@@ -1,0 +1,34 @@
+# Ignore Python cache and venv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.dll
+*.dylib
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Python packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Tests (optional to exclude from image)
+test/

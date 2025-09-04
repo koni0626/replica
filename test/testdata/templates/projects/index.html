@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}プロジェクト一覧{% endblock %}
+
+{% block content %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0">プロジェクト一覧</h1>
+    <!-- 上段に新規追加ボタン -->
+    <a href="{{ url_for('projects.create') }}" class="btn btn-primary">
+      新規追加
+    </a>
+  </div>
+
+
+  {% if projects %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+      {% for p in projects %}
+      <div class="col">
+        <div class="card h-100">
+          <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+            <span class="text-truncate">{{ p.project_name }}</span>
+            <!-- 編集ボタン -->
+            <a href="{{ url_for('projects.edit', project_id=p.project_id) }}" class="btn btn-sm btn-outline-secondary">
+              編集
+            </a>
+          </div>
+          <div class="card-body">
+            <p class="card-text text-muted mb-3 text-break">
+              {{ p.description or "説明は未登録です。" }}
+            </p>
+
+            {% if p.doc_path %}
+              <a class="btn btn-sm btn-outline-primary mb-3" href="{{ url_for('docs.index', project_id=p.project_id) }}" target="_blank" rel="noopener">
+                ドキュメント
+              </a>
+            {% else %}
+              <button class="btn btn-sm btn-outline-secondary mb-3" disabled>ドキュメントなし</button>
+            {% endif %}
+
+          </div>
+          <div class="card-footer small text-muted">
+            ID: {{ p.id }}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info">プロジェクトがありません。</div>
+  {% endif %}
+{% endblock %}

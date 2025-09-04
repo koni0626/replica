@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}ナレッジ編集{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-3">ナレッジ編集</h1>
+
+  <form method="post" novalidate>
+    {% include "knowledge/_form.html" %}
+    <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>
+    <a href="{{ url_for('knowledge.index', project_id=project_id) }}" class="btn btn-secondary">戻る</a>
+  </form>
+{% endblock %}

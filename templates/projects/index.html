@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}プロジェクト一覧{% endblock %}
+
+{% block content %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0">プロジェクト一覧</h1>
+    <!-- 上段に新規追加ボタン -->
+    <a href="{{ url_for('projects.create') }}" class="btn btn-primary">
+      新規追加
+    </a>
+  </div>
+
+  {% if projects %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+      {% for p in projects %}
+      <div class="col">
+        <div class="card h-100">
+          <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+            <span class="text-truncate">{{ p.project_name }}</span>
+            <!-- 編集ボタン -->
+            <a href="{{ url_for('projects.edit', project_id=p.project_id) }}" class="btn btn-sm btn-outline-secondary">
+              編集
+            </a>
+          </div>
+          <div class="card-body">
+            <p class="card-text text-muted mb-3 text-break">
+              {{ p.description or "説明は未登録です。" }}
+            </p>
+
+            <a class="btn btn-sm btn-outline-primary mb-3" href="{{ url_for('docs.index', project_id=p.project_id) }}" target="_blank" rel="noopener">
+              ドキュメント
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="showDuplicateDialog({{ p.project_id }})">複製</button>
+            <form action="{{ url_for('projects.delete_project', project_id=p.project_id) }}" method="post" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger mb-3" onclick="return confirm('本当にこのプロジェクトを削除しますか？');">削除</button>
+            </form>
+          </div>
+          <div class="card-footer small text-muted">
+            ID: {{ p.id }}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- ダイアログ -->
+    <div class="modal fade" id="duplicate-dialog" tabindex="-1" role="dialog" aria-labelledby="duplicateDialogLabel" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="duplicateDialogLabel">プロジェクトを複製</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form id="duplicate-form" action="" method="post">
+            <div class="modal-body">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="form-group">
+                <label for="new-name">新しいプロジェクト名:</label>
+                <input type="text" class="form-control" id="new-name" name="new_name" required>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+              <button type="submit" class="btn btn-primary">複製</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+  {% else %}
+    <div class="alert alert-info">プロジェクトがありません。</div>
+  {% endif %}
+
+<script>
+function showDuplicateDialog(projectId) {
+    const form = document.getElementById('duplicate-form');
+    form.action = `/projects/duplicate/${projectId}`;
+    const modal = new bootstrap.Modal(document.getElementById('duplicate-dialog'));
+    modal.show();
+}
+
+</script>
+
+{% endblock %}

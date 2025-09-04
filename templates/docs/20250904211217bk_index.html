@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}ドキュメント作成{% endblock %}
+
+{% block sidebar %}
+  {% include 'docs/doc_sidebar.html' %}
+{% endblock %}
+
+{% block content %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <a href="{{ url_for('projects.index') }}" class="btn btn-outline-secondary btn-sm">プロジェクト一覧へ</a>
+  </div>
+
+  <form method="post" novalidate>
+    {{ form.csrf_token }}
+
+    <div class="row g-4">
+      <!-- 左：プロンプト -->
+      <div class="col-12 col-md-6">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span class="fw-bold">{{ form.prompt.label }}</span>
+            <div class="d-flex gap-2">
+              {{ form.submit_generate(class="btn btn-primary btn-sm", id="btn-generate") }}
+              {{ form.submit_generate_tool(class="btn btn-primary btn-sm", id="btn-generate_tool") }}
+              {{ form.submit_commit(class="btn btn-success btn-sm", id="btn-commit") }}
+            </div>
+          </div>
+          <div class="card-body">
+            {{ form.prompt(class="form-control mb-3", id="prompt-input", rows="10", placeholder="仕様の要点や設計の方針などをMarkdownで入力") }}
+            {% for e in form.prompt.errors %}
+              <div class="text-danger small">{{ e }}</div>
+            {% endfor %}
+            <div class="border rounded p-3 bg-light" id="prompt-preview" style="min-height: 8rem;">
+              <div class="text-muted">（プロンプトのMarkdownプレビューがここに表示されます）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：出力 -->
+      <div class="col-12 col-md-6">
+        <div class="card h-100">
+          <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+            <span>最新の生成結果（プレビュー & 編集）</span>
+            <!-- 差分の表示ボタンを追加 -->
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-action="show-diff">
+              差分の表示
+            </button>
+          </div>
+          <div class="card-body position-relative">
+
+            <div id="loading-spinner" class="d-none mb-3">
+              <div class="d-flex align-items-center gap-2">
+                <div class="spinner-border text-primary" role="status" aria-hidden="true"></div>
+                <span class="text-muted">生成中です…</span>
+              </div>
+            </div>
+
+            <div class="border rounded p-3 bg-light mb-3" id="output-preview" style="min-height: 12rem;">
+              <div class="text-muted">（GPT生成結果のMarkdownプレビューがここに表示されます）</div>
+            </div>
+            {{ form.generated_content(class="form-control", id="output-input", rows="10", placeholder="必要ならここで加筆修正してからコミットできます") }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <!-- コミット済み（左右独立ナビ） -->
+  <div id="commits-section" class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div class="text-muted small">全{{ total }}件・新しい順（0が最新）</div>
+      <div class="htmx-indicator spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+    </div>
+
+    <div class="card-body">
+      <div class="row g-3">
+        <!-- 左ペイン -->
+        <div class="col-12 col-md-6">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <div class="fw-bold">プロンプト</div>
+              {% if current_left %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-primary"
+                        onclick="copyMarkdown('commit-left-src')"
+                        title="左ペインのMarkdownをコピー">
+                  MDコピー
+                </button>
+              {% endif %}
+            </div>
+            <div class="btn-group">
+              <a class="btn btn-sm btn-outline-secondary {% if not has_prev %}disabled{% endif %}"
+                 {% if has_prev %}
+                   hx-get="{{ url_for('docs.index', project_id=project_id, pos=pos+1) }}"
+                   hx-target="#commits-section"
+                   hx-select="#commits-section"
+                   hx-swap="outerHTML"
+                 {% endif %}>← Prev</a>
+              <a class="btn btn-sm btn-outline-secondary {% if not has_next %}disabled{% endif %}"
+                 {% if has_next %}
+                   hx-get="{{ url_for('docs.index', project_id=project_id, pos=pos-1) }}"
+                   hx-target="#commits-section"
+                   hx-select="#commits-section"
+                   hx-swap="outerHTML"
+                 {% endif %}>Next →</a>
+            </div>
+          </div>
+
+          {% if current_left %}
+            <div id="commit-left" class="markdown-body border rounded p-3"></div>
+            <textarea id="commit-left-src" class="d-none">{{ current_left.prompt }}</textarea>
+            <div class="text-muted small mt-2">
+              {{ current_left.committed_at.strftime("%Y-%m-%d %H:%M") }}
+            </div>
+            <!-- メモ入力欄 -->
+            <div class="mt-3">
+              <label for="note-input" class="form-label">メモ</label>
+              <textarea id="note-input" class="form-control" rows="3">{{ current_left.note | default('') }}</textarea>
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveNote()">保存</button>
+            </div>
+          {% else %}
+            <div class="text-muted">左側に表示するプロンプトがありません。</div>
+          {% endif %}
+        </div>
+        <!-- 右ペイン -->
+        <div class="col-12 col-md-6">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <div class="fw-bold">回答</div>
+              {% if current_right %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-primary"
+                        onclick="copyMarkdown('commit-right-src')"
+                        title="右ペインのMarkdownをコピー">
+                  MDコピー
+                </button>
+                <button type="button"
+                        class="btn btn-sm btn-outline-success"
+                        onclick="handleCodegen('right')"
+                        title="右ペインのMarkdownからコード生成">
+                  コード生成
+                </button>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if current_right %}
+            <div id="commit-right" class="markdown-body border rounded p-3"></div>
+            <textarea id="commit-right-src" class="d-none">{{ current_right.content }}</textarea>
+            <div class="text-muted small mt-2">
+              {{ current_right.committed_at.strftime("%Y-%m-%d %H:%M") }}
+            </div>
+          {% else %}
+            <div class="text-muted">右側に表示する回答がありません。</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card-footer d-flex justify-content-end gap-2">
+      <!-- コミットを削除 -->
+      <button
+        class="btn btn-outline-danger btn-sm"
+        {% if not current_right %}disabled{% endif %}
+        {% if current_right %}
+          hx-post="{{ url_for('docs.delete_memo',
+                              project_id=project_id,
+                              memo_id=current_right.doc_id,
+                              pos=pos) }}"
+          hx-target="#commits-section"
+          hx-select="#commits-section"
+          hx-swap="outerHTML"
+          hx-confirm="右側のコミット（ID: {{ current_right.doc_id }}）を削除します。よろしいですか？"
+          hx-headers='{"X-CSRFToken":"{{ form.csrf_token._value() }}"}'
+        {% endif %}
+      >
+        削除
+      </button>
+    </div>
+  </div>
+
+  <!-- 生成結果モーダル -->
+  <div class="modal fade" id="codegenModal" tabindex="-1" aria-labelledby="codegenModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="codegenModalLabel">コード生成結果</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body">
+          <div id="codegen-status" class="text-muted mb-3">生成中…</div>
+          <div id="codegen-actions" class="d-none mb-3">
+            <a id="codegen-zip-link" class="btn btn-sm btn-primary" href="#" target="_blank" rel="noopener">ZIPをダウンロード</a>
+          </div>
+          <pre id="codegen-summary" class="bg-light p-3 rounded" style="white-space: pre-wrap;"></pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ライブラリ（順序が重要） -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
+  <!-- highlight.js 本体（テーマは任意で変更可） -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/styles/github.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/highlight.min.js"></script>
+
+  <!-- 行番号ライブラリ（こちらが hljs.lineNumbersBlock を提供） -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/styles/line-numbers.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
+
+  <!-- diff2html（差分表示用） -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
+
+  <!-- htmx -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+  <style>
+    #commits-section { scroll-margin-top: 72px; }
+    .htmx-indicator { display:none; }
+    .htmx-request .htmx-indicator { display:inline-block; }
+
+    .copy-toast{
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.85);
+      color:#fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: opacity .2s ease;
+      z-index: 1050;
+      font-size: .9rem;
+    }
+    .copy-toast.show{ opacity: 1; }
+
+    pre { position: relative; }
+
+    .copy-button {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: #f8f9fa;
+      border: 1px solid #ced4da;
+      border-radius: 0.25rem;
+      padding: 0.15rem 0.3rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+  </style>
+
+  <!-- ページ専用スクリプト（外部JS） -->
+  <div id="docs-root"
+       data-stream-url="{{ url_for('docs.stream_generate', project_id=project_id) }}"
+       data-stream-url-tool="{{ url_for('docs.stream_generate_tool', project_id=project_id) }}"
+       data-codegen-url="{{ url_for('docs.codegen', project_id=project_id) }}"
+       {% if current_left %}
+       data-left-doc-id="{{ current_left.doc_id }}"
+       data-csrf="{{ form.csrf_token._value() }}"
+       {% endif %}></div>
+  <script src="{{ url_for('static', filename='js/docs_index.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/docs_index_diff.js') }}"></script>
+{% endblock %}

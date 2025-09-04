@@ -1,0 +1,36 @@
+{# templates/knowledge/index.html #}
+{% extends "base.html" %}
+{% block title %}ナレッジ一覧{% endblock %}
+
+{% block sidebar %}
+  {% include 'docs/doc_sidebar.html' %}
+{% endblock %}
+
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">プロジェクトナレッジ</h1>
+    <a class="btn btn-primary" href="{{ url_for('knowledge.create', project_id=project_id) }}">新規追加</a>
+  </div>
+
+  {% if knowledge %}
+    <ul class="list-group">
+      {% for k in knowledge %}
+        <li class="list-group-item">
+          <h5>{{ k.title }}</h5>
+          <p class="text-muted small mb-1">カテゴリ: {{ k.category or '未分類' }}</p>
+          <p class="text-break">{{ k.content }}</p>
+          <div class="mt-2">
+            <a href="{{ url_for('knowledge.edit', project_id=project_id, knowledge_id=k.knowledge_id) }}" class="btn btn-sm btn-outline-secondary">編集</a>
+            <form method="post" action="{{ url_for('knowledge.delete', project_id=project_id, knowledge_id=k.knowledge_id) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('削除しますか？')">削除</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="alert alert-info">ナレッジが登録されていません。</div>
+  {% endif %}
+{% endblock %}

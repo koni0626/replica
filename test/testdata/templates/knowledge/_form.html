@@ -1,0 +1,65 @@
+{# templates/knowledge/_form.html #}
+{{ form.csrf_token }}
+
+{% if form.project_id %}
+  <div class="mb-3">
+    {{ form.project_id.label(class="form-label") }}
+    {{ form.project_id(class="form-control") }}
+    {% for error in form.project_id.errors %}
+      <div class="text-danger small">{{ error }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="mb-3">
+    {{ form.title.label(class="form-label") }}
+    {{ form.title(class="form-control") }}
+    {% for error in form.title.errors %}
+      <div class="text-danger small">{{ error }}</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- 左：入力フォーム -->
+  <div class="col-md-6">
+    <div class="mb-3">
+      {{ form.content.label(class="form-label") }}
+      {{ form.content(class="form-control", rows="10", id="content-input") }}
+      {% for error in form.content.errors %}
+        <div class="text-danger small">{{ error }}</div>
+      {% endfor %}
+    </div>
+  </div>
+  <!-- 右：Markdownプレビュー -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-bold">プレビュー</div>
+      <div class="card-body">
+        <div class="border rounded p-3 bg-light" id="content-preview" style="min-height: 20rem;">
+          <div class="text-muted">（Markdownプレビューがここに表示されます）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+<script>
+  marked.setOptions({ gfm: true, breaks: true });
+  function renderMarkdownTo(targetEl, srcText) {
+    const dirty = marked.parse(srcText || "");
+    const html = DOMPurify.sanitize(dirty);
+    targetEl.innerHTML = html;
+  }
+  const contentInput = document.getElementById("content-input");
+  const contentPreview = document.getElementById("content-preview");
+  if (contentInput && contentPreview) {
+    const updatePreview = () => renderMarkdownTo(contentPreview, contentInput.value);
+    contentInput.addEventListener("input", updatePreview);
+    updatePreview();
+  }
+</script>

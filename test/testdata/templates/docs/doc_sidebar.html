@@ -1,0 +1,12 @@
+<nav class="col-md-2 d-none d-md-block bg-light sidebar p-3">
+  <h6 class="sidebar-heading">メニュー</h6>
+  <ul class="nav flex-column">
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('knowledge.index', project_id=project_id) }}">知識</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('docs.index', project_id=project_id) }}">デザインメモ</a></li>
+    <li class="nav-item"><a class="nav-link" href="#">要件定義</a></li>
+    <li class="nav-item"><a class="nav-link" href="#">基本設計書</a></li>
+    <li class="nav-item"><a class="nav-link" href="#">詳細設計</a></li>
+    <li class="nav-item"><a class="nav-link" href="#">コード</a></li>
+    <li class="nav-item"><a class="nav-link" href="#">リリース手順</a></li>
+  </ul>
+</nav>

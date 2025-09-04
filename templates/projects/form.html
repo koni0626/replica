@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ '新規プロジェクト' if mode=='create' else 'プロジェクト編集' }}{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-3">{{ '新規プロジェクト' if mode=='create' else 'プロジェクト編集' }}</h1>
+
+  <form method="post" novalidate enctype="multipart/form-data">
+    {{ form.csrf_token }}
+
+    <div class="mb-3">
+      <label class="form-label">{{ form.project_name.label }}</label>
+      {{ form.project_name(class="form-control", placeholder="例）案件A") }}
+      {% for e in form.project_name.errors %}
+        <div class="text-danger small">{{ e }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">{{ form.description.label }}</label>
+      {{ form.description(class="form-control", placeholder="概要・目的など") }}
+      {% for e in form.description.errors %}
+        <div class="text-danger small">{{ e }}</div>
+      {% endfor %}
+    </div>
+
+    {% if mode == 'edit' %}
+      <div class="mb-3">
+        <label class="form-label">現在のドキュメントパス</label>
+        {# readonlyにして送信時も値が保持されるようにする（disabledは送信されない） #}
+        {{ form.doc_path(class="form-control", readonly=true) }}
+        <div class="form-text">ZIPをアップロードすると、解凍先ディレクトリで上書きされます。</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">ドキュメントZIPをアップロード（.zip）</label>
+        <input type="file" name="doc_zip" accept=".zip" class="form-control">
+        <div class="form-text">アップロードしたZIPは安全に解凍され、そのフォルダパスがdoc_pathに設定されます。</div>
+      </div>
+    {% else %}
+      <div class="mb-3">
+        <label class="form-label">{{ form.doc_path.label }}</label>
+        {{ form.doc_path(class="form-control", placeholder="/docs/path/to/file") }}
+        {% for e in form.doc_path.errors %}
+          <div class="text-danger small">{{ e }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">
+        {{ '登録' if mode=='create' else '更新' }}
+      </button>
+      <a href="{{ url_for('projects.index') }}" class="btn btn-outline-secondary">戻る</a>
+    </div>
+  </form>
+{% endblock %}

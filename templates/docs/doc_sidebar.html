@@ -1,0 +1,7 @@
+<nav class="col-md-2 d-none d-md-block bg-light sidebar p-3">
+  <h6 class="sidebar-heading">メニュー</h6>
+  <ul class="nav flex-column">
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('knowledge.index', project_id=project_id) }}">知識</a></li>
+    <li><a class="nav-link" href="{{ url_for('docs.index', project_id=project_id) }}">プロンプト</a></li>
+  </ul>
+</nav>
