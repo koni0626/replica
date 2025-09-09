@@ -12,6 +12,7 @@ from models.knowledge import Knowledge
 from tools import tools
 from tools import php_tools
 from tools import git_tool
+from tools import network_tool
 
 
 class GptProvider(object):
@@ -22,15 +23,18 @@ class GptProvider(object):
         timeout: int = 300,
         max_retries: int = 2,
     ):
+        # LLM 構成
         self.llm = ChatOpenAI(
             model=model,
             temperature=temperature,
             timeout=timeout,
             max_retries=max_retries,
         )
-
         self.parser = StrOutputParser()
+
+        # ツールのバインド（LLM 側に公開する関数群）
         self.llm_with_tool = self.llm.bind_tools([
+            # FS/Text ツール
             tools.find_files,
             tools.write_file,
             tools.read_file,
@@ -42,14 +46,17 @@ class GptProvider(object):
             tools.insert_code,
             tools.update_code,
             tools.delete_code,
-            php_tools.php_locate_functions,
-            php_tools.php_insert_after_function_end,
-            php_tools.php_replace_function_body,
             tools.replace_in_line,
             tools.search_grep,
             tools.detect_txt_encoding_utf8_or_sjis,
             tools.convert_txt_to_utf8,
-            # Git tools
+            # PHP 用
+            php_tools.php_locate_functions,
+            php_tools.php_insert_after_function_end,
+            php_tools.php_replace_function_body,
+            # ネットワーク
+            network_tool.fetch_url_text,
+            # Git
             git_tool.git_diff_files,
             git_tool.git_diff_patch,
             git_tool.git_list_branches,
@@ -62,8 +69,9 @@ class GptProvider(object):
             git_tool.git_diff_own_changes_files,
         ])
 
-        # name → tool 関数マップ（invoke で呼び出す）
+        # name → 実関数マップ（tool_calls を実行するディスパッチ）
         self.tool_map = {
+            # FS/Text ツール
             "list_files": tools.list_files,
             "read_file": tools.read_file,
             "write_file": tools.write_file,
@@ -75,14 +83,17 @@ class GptProvider(object):
             "insert_code": tools.insert_code,
             "update_code": tools.update_code,
             "delete_code": tools.delete_code,
-            "php_locate_functions": php_tools.php_locate_functions,
-            "php_insert_after_function_end": php_tools.php_insert_after_function_end,
-            "php_replace_function_body": php_tools.php_replace_function_body,
             "replace_in_line": tools.replace_in_line,
             "search_grep": tools.search_grep,
             "detect_txt_encoding_utf8_or_sjis": tools.detect_txt_encoding_utf8_or_sjis,
             "convert_txt_to_utf8": tools.convert_txt_to_utf8,
-            # Git tools
+            # PHP 用
+            "php_locate_functions": php_tools.php_locate_functions,
+            "php_insert_after_function_end": php_tools.php_insert_after_function_end,
+            "php_replace_function_body": php_tools.php_replace_function_body,
+            # ネットワーク
+            "fetch_url_text": network_tool.fetch_url_text,
+            # Git
             "git_diff_files": git_tool.git_diff_files,
             "git_diff_patch": git_tool.git_diff_patch,
             "git_list_branches": git_tool.git_list_branches,
