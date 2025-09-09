@@ -993,3 +993,182 @@ def replace_in_line(
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
         return json.dumps(out, ensure_ascii=False)
+
+@tool
+def detect_txt_encoding_utf8_or_sjis(file_path: str) -> str:
+    """
+    指定テキストファイルのエンコーディングが UTF-8 / UTF-8(BOM) / SJIS(CP932) のいずれかを判定して返します。
+    戻り: JSON 文字列 { ok, file_path, encoding, is_bom, size, error? }
+    - encoding: "utf-8" | "utf-8-sig" | "cp932" | "unknown"
+    - is_bom: UTF-8 の BOM を検出した場合 True（utf-8-sig 相当）
+    注意: Heuristics による簡易判定です。対象は .txt を想定。
+    """
+    out: Dict[str, object] = {"ok": False, "file_path": file_path, "encoding": None, "is_bom": False}
+    try:
+        p = Path(file_path)
+        if not p.exists() or not p.is_file():
+            out["error"] = "file_not_found"
+            return json.dumps(out, ensure_ascii=False)
+
+        data = p.read_bytes()
+        out["size"] = len(data)
+        # バイナリ（NULL含み）っぽい場合は unknown 扱い
+        if b"\x00" in data:
+            out["encoding"] = "unknown"
+            out["ok"] = True
+            return json.dumps(out, ensure_ascii=False)
+
+        # BOM 判定
+        if data.startswith(b"\xef\xbb\xbf"):
+            try:
+                _ = data.decode("utf-8-sig")  # BOM 除去して検証
+                out["encoding"] = "utf-8-sig"
+                out["is_bom"] = True
+                out["ok"] = True
+                return json.dumps(out, ensure_ascii=False)
+            except UnicodeDecodeError:
+                pass
+
+        # 素の UTF-8
+        try:
+            _ = data.decode("utf-8")
+            out["encoding"] = "utf-8"
+            out["is_bom"] = False
+            out["ok"] = True
+            return json.dumps(out, ensure_ascii=False)
+        except UnicodeDecodeError:
+            pass
+
+        # CP932（Shift_JIS系）
+        try:
+            _ = data.decode("cp932")
+            out["encoding"] = "cp932"
+            out["is_bom"] = False
+            out["ok"] = True
+            return json.dumps(out, ensure_ascii=False)
+        except UnicodeDecodeError:
+            out["encoding"] = "unknown"
+            out["ok"] = True
+            return json.dumps(out, ensure_ascii=False)
+
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return json.dumps(out, ensure_ascii=False)
+
+
+@tool
+def convert_txt_to_utf8(file_path: str, create_backup: bool = True, only_txt_ext: bool = True) -> str:
+    """
+    テキストファイル（UTF-8 / UTF-8(BOM) / SJIS(CP932) を想定）を UTF-8（BOMなし）で上書き保存します。
+    - 判定手順: BOM検出 → UTF-8 → CP932 の順でデコードを試行
+    - 既に UTF-8（BOMなし）の場合は、再保存せずそのまま（changed=False）
+    - UTF-8(BOM) や CP932 の場合は UTF-8 に変換して保存（改行は原文維持）
+
+    Args:
+      file_path: 対象ファイルパス
+      create_backup: 変換前のバックアップを同ディレクトリに .bak で作成
+      only_txt_ext: True の場合は拡張子が .txt のファイルのみ処理（それ以外はエラー）
+
+    Returns(JSON):
+      {
+        ok: true/false,
+        file_path: "...",
+        before_encoding: "utf-8|utf-8-sig|cp932|unknown",
+        after_encoding: "utf-8",
+        is_bom: bool,
+        changed: bool,
+        backup_path?: "...",
+        size_before: int,
+        size_after: int,
+        error?: "..."
+      }
+    """
+    out: Dict[str, object] = {
+        "ok": False,
+        "file_path": file_path,
+        "before_encoding": None,
+        "after_encoding": "utf-8",
+        "is_bom": False,
+        "changed": False,
+    }
+    try:
+        p = Path(file_path)
+        if not p.exists() or not p.is_file():
+            out["error"] = "file_not_found"
+            return json.dumps(out, ensure_ascii=False)
+
+        if only_txt_ext and p.suffix.lower() != ".txt":
+            out["error"] = "not_txt_extension"
+            return json.dumps(out, ensure_ascii=False)
+
+        data = p.read_bytes()
+        out["size_before"] = len(data)
+        if b"\x00" in data:
+            out["before_encoding"] = "unknown"
+            out["error"] = "binary_like_content"
+            return json.dumps(out, ensure_ascii=False)
+
+        text: Optional[str] = None
+        enc: Optional[str] = None
+        is_bom = False
+
+        if data.startswith(b"\xef\xbb\xbf"):
+            try:
+                text = data.decode("utf-8-sig")  # BOM 除去
+                enc = "utf-8-sig"
+                is_bom = True
+            except UnicodeDecodeError:
+                text = None
+
+        if text is None:
+            try:
+                text = data.decode("utf-8")
+                enc = "utf-8"
+            except UnicodeDecodeError:
+                text = None
+
+        if text is None:
+            try:
+                text = data.decode("cp932")
+                enc = "cp932"
+            except UnicodeDecodeError:
+                text = None
+
+        if text is None:
+            out["before_encoding"] = "unknown"
+            out["error"] = "cannot_decode_as_utf8_or_sjis"
+            return json.dumps(out, ensure_ascii=False)
+
+        out["before_encoding"] = enc
+        out["is_bom"] = bool(is_bom)
+
+        # 既に UTF-8（BOMなし）なら変更不要
+        if enc == "utf-8":
+            out["changed"] = False
+            out["size_after"] = out["size_before"]
+            out["ok"] = True
+            return json.dumps(out, ensure_ascii=False)
+
+        # バックアップ
+        if create_backup:
+            try:
+                import shutil
+                bak = p.with_suffix(p.suffix + ".bak")
+                shutil.copy2(str(p), str(bak))
+                out["backup_path"] = str(bak)
+            except Exception as be:
+                out["error"] = f"backup_failed: {type(be).__name__}: {be}"
+                return json.dumps(out, ensure_ascii=False)
+
+        # UTF-8 (BOMなし) で上書き。改行は原文維持のため newline="" を指定
+        with p.open("w", encoding="utf-8", newline="") as f:
+            f.write(text)
+
+        out["changed"] = True
+        out["size_after"] = p.stat().st_size
+        out["ok"] = True
+        return json.dumps(out, ensure_ascii=False)
+
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return json.dumps(out, ensure_ascii=False)

@@ -47,6 +47,8 @@ class GptProvider(object):
             php_tools.php_replace_function_body,
             tools.replace_in_line,
             tools.search_grep,
+            tools.detect_txt_encoding_utf8_or_sjis,
+            tools.convert_txt_to_utf8,
             # Git tools
             git_tool.git_diff_files,
             git_tool.git_diff_patch,
@@ -78,6 +80,8 @@ class GptProvider(object):
             "php_replace_function_body": php_tools.php_replace_function_body,
             "replace_in_line": tools.replace_in_line,
             "search_grep": tools.search_grep,
+            "detect_txt_encoding_utf8_or_sjis": tools.detect_txt_encoding_utf8_or_sjis,
+            "convert_txt_to_utf8": tools.convert_txt_to_utf8,
             # Git tools
             "git_diff_files": git_tool.git_diff_files,
             "git_diff_patch": git_tool.git_diff_patch,
