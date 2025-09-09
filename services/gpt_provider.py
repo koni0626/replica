@@ -222,9 +222,8 @@ class GptProvider(object):
             if not tool_calls:
                 # ツール呼び出しがない場合はそのままストリームを返す
                 ai = self.llm.invoke(conversation)
-                text = (getattr(ai, "content", "") or "").strip()
-                for piece in self._chunk_text(text):
-                    yield piece
+                text = (getattr(ai, "content", "") or "")
+                yield text
                 print("\n[FIN]")
                 return
 
