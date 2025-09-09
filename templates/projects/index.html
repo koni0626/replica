@@ -27,7 +27,7 @@
               {{ p.description or "説明は未登録です。" }}
             </p>
 
-            <a class="btn btn-sm btn-outline-primary mb-3" href="{{ url_for('docs.index', project_id=p.project_id) }}" target="_blank" rel="noopener">
+            <a class="btn btn-sm btn-outline-primary mb-3" href="{{ url_for('docs.index', project_id=p.project_id) }}">
               ドキュメント
             </a>
             <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="showDuplicateDialog({{ p.project_id }})">複製</button>

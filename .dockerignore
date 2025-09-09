@@ -1,34 +1,35 @@
-# Ignore Python cache and venv
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+
+# Virtualenv
 .venv/
+venv/
+ENV/
 
 # Git
 .git/
 .gitignore
 
-# Byte-compiled / optimized / DLL files
-*.so
-*.dll
-*.dylib
-
-# OS files
+# Editors/OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Local data
+logs/
 *.log
 
-# Python packaging
-build/
-dist/
-.eggs/
-*.egg-info/
+# Node (if any)
+node_modules/
 
-# IDE
-.vscode/
-.idea/
+# Docker/Compose artifacts
+*.bk_*
+*.bk
 
-# Tests (optional to exclude from image)
-test/
+# Build context exclusions (add if needed)
+# docs/  # ← 実体はホストからマウントするため、プロジェクト直下に巨大ファイルがある場合は除外検討

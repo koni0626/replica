@@ -53,7 +53,7 @@ def edit(project_id: int):
                 return render_template("projects/form.html", form=form, mode="edit", project=project)
 
         pj_sv.update_project(
-            project_id=project.id,
+            project_id=project.project_id,
             project_name=form.project_name.data,
             description=form.description.data,
             doc_path=extracted_path if extracted_path is not None else form.doc_path.data,

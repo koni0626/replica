@@ -2,8 +2,10 @@
 {% block title %}ナレッジ登録{% endblock %}
 
 {% block content %}
-  <h1 class="h3 mb-3">ナレッジ登録</h1>
-
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0 text-truncate">{{ project_name }} / ナレッジ追加</h1>
+    <a href="{{ url_for('knowledge.index', project_id=project_id) }}" class="btn btn-outline-secondary">一覧へ</a>
+  </div>
   <form method="post" novalidate>
     {% include "knowledge/_form.html" %}
     <button type="submit" class="btn btn-primary">{{ form.submit.label.text }}</button>

@@ -6,6 +6,7 @@
  * - クリップボードコピー、トースト表示
  * - メモ保存
  * - 添付アップロード（必須拡張子のみ）
+ * - モデル選択（gpt-5 / gpt-4o）
  *
  * テンプレート側（Jinja）で提供される要素ID・構造を前提とする。
  * 依存: marked, DOMPurify, highlight.js, highlightjs-line-numbers, htmx（任意）, Bootstrap（モーダル）
@@ -50,8 +51,10 @@
      */
     function renderMarkdownTo(targetEl, srcText, addLineNumbers = true) {
       const md = (srcText || '');
+      // 危険なタグ（script/style/iframe）の開始記号をエスケープして生HTML解釈を防ぐ
+      const safeMd = md.replace(/<(?=\/?(script|style|iframe)\b)/gi, '&lt;');
       // Markdown -> HTML（marked が無い場合は素通し）
-      const dirty = window.marked ? window.marked.parse(md) : md;
+      const dirty = window.marked ? window.marked.parse(safeMd) : safeMd;
       // サニタイズ（DOMPurify が無い場合は素通し）
       const html  = window.DOMPurify ? window.DOMPurify.sanitize(dirty) : dirty;
       targetEl.innerHTML = html;
@@ -110,6 +113,46 @@
       }
     }
 
+    // --- 知識化（左: プロンプト / 右: 回答） ---
+    // ボタンにイベントバインド（inline onclick を使わずに addEventListener で紐付け）
+    const btnKnowLeft  = document.getElementById('btn-knowledge-left');
+    const btnKnowRight = document.getElementById('btn-knowledge-right');
+    if (btnKnowLeft)  btnKnowLeft.addEventListener('click',  () => knowledgeFromPrompt('left'));
+    if (btnKnowRight) btnKnowRight.addEventListener('click', () => knowledgeFromPrompt('right'));
+    async function knowledgeFromPrompt(which){
+      try{
+        const csrf = document.querySelector("input[name='csrf_token']")?.value;
+        const projectId = (document.getElementById('docs-root')?.getAttribute('data-project-id')) ||
+                          (new URL(location.href)).pathname.split('/').filter(Boolean).pop();
+        const title = prompt('知識のタイトルを入力してください');
+        if (!title) return;
+        let content = '';
+        if (which === 'left'){
+          const ta = document.getElementById('commit-left-src');
+          content = ta ? ta.value : (document.getElementById('prompt-input')?.value || '');
+        } else {
+          const ta = document.getElementById('commit-right-src');
+          content = ta ? ta.value : (document.getElementById('output-input')?.value || '');
+        }
+        const resp = await fetch('/knowledge/api/create_from_prompt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrf ? { 'X-CSRFToken': csrf } : {})
+          },
+          body: JSON.stringify({ project_id: Number(projectId), title, content })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok){
+          alert(data.message || '知識の作成に失敗しました');
+          return;
+        }
+        showToast('知識として保存しました');
+      }catch(e){
+        console.error(e);
+        alert('知識の作成に失敗しました');
+      }
+    }
     // 入出力プレビュー要素の参照
     const promptInput   = document.getElementById('prompt-input');
     const promptPreview = document.getElementById('prompt-preview');
@@ -133,6 +176,18 @@
     // ルート要素（テンプレートから data-* を受け取る）
     const root = document.getElementById('docs-root');
 
+    // --- モデル選択（UIとlocalStorage） ---
+    const modelSelect = document.getElementById('model-select');
+    const MODEL_KEY = 'llm_model';
+    const DEFAULT_MODEL = 'gpt-5';
+    if (modelSelect) {
+      const saved = localStorage.getItem(MODEL_KEY) || DEFAULT_MODEL;
+      modelSelect.value = saved;
+      modelSelect.addEventListener('change', () => {
+        localStorage.setItem(MODEL_KEY, modelSelect.value || DEFAULT_MODEL);
+      });
+    }
+
     // ストリーミング生成（通常/ツール）を内包するスコープ
     (function(){
       // 主要UIの参照
@@ -150,10 +205,11 @@
       const streamUrl = root?.getAttribute('data-stream-url');
       const streamUrlTool = root?.getAttribute('data-stream-url-tool');
 
+      // 送信モデルを取得
+      const getSelectedModel = () => (document.getElementById('model-select')?.value || DEFAULT_MODEL);
+
       /**
        * 通常のストリーミング生成（/docs/stream_generate）
-       * - 入力プロンプトを送信し、レスポンスBodyを逐次読み取り
-       * - 出力テキストエリアとプレビューを随時更新
        */
       async function streamGenerate(e) {
         e.preventDefault();
@@ -181,7 +237,7 @@
               'Content-Type': 'application/json',
               ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {})
             },
-            body: JSON.stringify({ prompt: promptInput.value || '', attachments })
+            body: JSON.stringify({ prompt: promptInput.value || '', attachments, model: getSelectedModel() })
           });
 
           if (!resp.ok || !resp.body) {
@@ -221,7 +277,6 @@
 
       /**
        * ツール連携ありのストリーミング生成（/docs/stream_generate_tool）
-       * - 挙動は streamGenerate と同等、呼び出しURLが異なる
        */
       async function streamGenerateTool(e) {
         e.preventDefault();
@@ -247,7 +302,7 @@
               'Content-Type': 'application/json',
               ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {})
             },
-            body: JSON.stringify({ prompt: promptInput.value || '', attachments })
+            body: JSON.stringify({ prompt: promptInput.value || '', attachments, model: getSelectedModel() })
           });
 
           if (!resp.ok || !resp.body) {

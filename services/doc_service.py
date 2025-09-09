@@ -63,7 +63,7 @@ class DocService(object):
         # 既定は古い→新しい（会話順に自然）
         return list(reversed(rows))
 
-    def delete_memo(self, project_id: int, memo_id: int) -> bool:
+    def delete_history(self, project_id: int, memo_id: int) -> bool:
         memo = Docs.query.filter_by(doc_id=memo_id, project_id=project_id).first()
         if not memo:
             return False

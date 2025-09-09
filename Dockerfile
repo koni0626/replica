@@ -1,42 +1,48 @@
-# syntax=docker/dockerfile:1
+# SystemGen Dockerfile (named volumes version)
+# - Python 3.10.11
+# - Expose port 5000
+# - Use named volumes for /docs and /app/instance
 
-# Base image
-FROM python:3.11-slim AS base
+FROM python:3.10.11-slim
 
-# Prevent Python from writing .pyc files and enable unbuffered output
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Basic envs
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHON_PATH=/app \
+    TZ=Asia/Tokyo \
+    OPENAI_API_KEY=""
 
-# Install system deps (build tools are useful for some Python wheels)
+# Workdir (app install path)
+WORKDIR ${PYTHON_PATH}
+
+# System deps (git is required for git diff in DiffService)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       curl \
+    && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Workdir
-WORKDIR /app
+# Install deps (requirements.txt must be UTF-8)
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Python deps first (leverage Docker layer caching)
-COPY requirements.txt ./
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Copy app
+COPY . .
 
-# Copy project
-COPY . /app
+# Ensure instance dir exists (SQLite replica.db will reside here)
+RUN mkdir -p ${PYTHON_PATH}/instance
 
-# Create a non-root user (optional but recommended)
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
+# Named volume mount points (actual volume is defined by docker-compose)
+VOLUME ["/docs"]
+VOLUME ["${PYTHON_PATH}/instance"]
 
-# App port
-ENV PORT=8000
-EXPOSE 8000
+# Expose Flask port
+EXPOSE 5000
 
-# Default DB (override with -e DATABASE_URL)
-ENV DATABASE_URL=sqlite:///sample.db \
-    SECRET_KEY=change_me
+# Normalize line endings to LF and make entrypoint executable
+RUN sed -i 's/\r$//' ${PYTHON_PATH}/docker-entrypoint.sh && chmod +x ${PYTHON_PATH}/docker-entrypoint.sh
 
-# Run with Gunicorn using the Flask application factory
-# app.py exposes create_app() so we can pass it directly to gunicorn
-CMD ["gunicorn", "-w", "4", "-k", "gthread", "--threads", "8", "-b", "0.0.0.0:8000", "app:create_app()"]
+# Use entrypoint to run DB migrations before starting the app
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Start without Gunicorn (per requirement)
+CMD ["python", "app.py"]
+# Start without Gunicorn (per requirement)
+CMD ["python", "app.py"]

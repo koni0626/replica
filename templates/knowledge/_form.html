@@ -51,7 +51,10 @@
 <script>
   marked.setOptions({ gfm: true, breaks: true });
   function renderMarkdownTo(targetEl, srcText) {
-    const dirty = marked.parse(srcText || "");
+    const md = (srcText || "");
+    // 危険なタグ（script/style/iframe）の開始記号をエスケープして生HTML解釈を防ぐ
+    const safeMd = md.replace(/<(?=\/?(script|style|iframe)\b)/gi, '&lt;');
+    const dirty = marked.parse(safeMd);
     const html = DOMPurify.sanitize(dirty);
     targetEl.innerHTML = html;
   }

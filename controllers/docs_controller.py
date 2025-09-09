@@ -12,6 +12,7 @@ import uuid
 from werkzeug.utils import secure_filename
 
 from flask import current_app
+from services.project_service import ProjectService
 
 
 docs_bp = Blueprint("docs", __name__)
@@ -112,6 +113,10 @@ def index(project_id: int):
     form = DocForm()
     svc = DocService()
 
+    # 追加: プロジェクト名を取得
+    pj = ProjectService().fetch_by_id(project_id)
+    project_name = pj.project_name if pj else f"Project #{project_id}"
+
     total = svc.count_by_project(project_id)
 
     pos = max(request.args.get("pos", 0, type=int) or 0, 0)
@@ -140,6 +145,7 @@ def index(project_id: int):
         "docs/index.html",
         form=form,
         project_id=project_id,
+        project_name=project_name,
         current_left=current_commit,
         current_right=current_commit,
         pos=pos,
@@ -147,7 +153,6 @@ def index(project_id: int):
         has_next=has_next,
         total=total,
     )
-
 
 @docs_bp.route("/save_note/<int:doc_id>", methods=["POST"])
 @login_required
@@ -244,84 +249,11 @@ def _build_attachments_text(project_id: int, user_id: int, paths: list[str], per
     return "".join(parts)
 
 
-@docs_bp.route("/<int:project_id>/stream", methods=["POST"])
-@login_required
-def stream_generate(project_id: int):
-    data = request.get_json(silent=True) or {}
-    prompt = (data.get("prompt") or "").strip()
-    attachments = data.get("attachments") or []
-    if not prompt:
-        return jsonify({"error": "prompt is required"}), 400
-
-    # 添付（media配下のファイル）を読み込み、プロンプトにサーバ側で追記
-    att_text = _build_attachments_text(project_id, current_user.user_id, attachments)
-    final_prompt = prompt + att_text
-
-    provider = GptProvider()
-    svc = DocService()
-
-    def generate():
-        yield ""
-        for piece in provider.stream_with_history(project_id=project_id, prompt=final_prompt, svc=svc, history_limit=20):
-            yield piece
-
-    return Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
-
-
-@docs_bp.route("/<int:project_id>/codegen", methods=["POST"])
-@login_required
-def codegen(project_id: int):
-    data = request.get_json(silent=True) or {}
-    spec = (data.get("spec_markdown") or "").strip()
-    project_name = (data.get("project_name") or "generated_project").strip()
-    if not spec:
-        return jsonify({"ok": False, "error": "spec_markdown is required"}), 400
-
-    provider = GptProvider()
-    svc = DocService()
-
-    result = provider.generate_project_with_tools(
-        project_id=project_id,
-        spec_markdown=spec,
-        svc=svc,
-        project_name=project_name,
-        create_zip=True,
-        history_limit=50,
-    )
-
-    summary = result.content or ""
-    zip_path = None
-    m = re.search(r"zip_path=([^\s]+)", summary)
-    if m:
-        zip_path = m.group(1)
-
-    if not zip_path:
-        return jsonify({"ok": True, "zip_url": None, "summary": summary})
-
-    try:
-        p = _safe_file_within_allowed_roots(zip_path)
-    except Exception:
-        return jsonify({"ok": True, "zip_url": None, "summary": summary})
-
-    dl_url = url_for("docs.download_generated", path=str(p), _external=False)
-    return jsonify({"ok": True, "zip_url": dl_url, "summary": summary})
-
-
-@docs_bp.route("/download/generated")
-@login_required
-def download_generated():
-    path = request.args.get("path", "")
-    if not path:
-        abort(400)
-    p = _safe_file_within_allowed_roots(path)
-    return send_file(p, as_attachment=True, download_name=p.name)
-
-
 @docs_bp.route("/<int:project_id>/delete/<int:memo_id>", methods=["POST"])
 @login_required
-def delete_memo(project_id: int, memo_id: int):
+def delete_history(project_id: int, memo_id: int):
     svc = DocService()
-    svc.delete_memo(project_id, memo_id)
+    svc.delete_history(project_id, memo_id)
 
     left_pos  = max(request.args.get("left_pos", 0, type=int) or 0, 0)
     right_pos = max(request.args.get("right_pos", 1, type=int) or 0, 0)
@@ -385,17 +317,34 @@ def stream_generate_tool(project_id: int):
 @login_required
 def latest_diff(project_id: int):
     """
-    直近のバックアップと現行ファイルの差分一覧をJSONで返す簡易API。
-    現状は base_dir をプロジェクトカレント配下に固定し、全体から探索する。
-    将来的にはプロジェクトのルートを記録してそこに限定する。
+    Git 管理の doc_path から差分（git diff）を取得して返す。
+    未設定/不正/非Git の場合はエラーJSON（カレントへのフォールバックはしない）。
+    クエリ ?staged=1 でステージ済み差分。
     """
-    base_dir = Path.cwd()
+    from services.project_service import ProjectService
+    ps = ProjectService()
+    proj = ps.fetch_by_id(project_id)
+    if not proj or not getattr(proj, 'doc_path', None):
+        return jsonify({"ok": False, "error": "doc_path_not_set", "message": "このプロジェクトのdoc_pathが設定されていません。プロジェクト詳細で設定してください。"}), 400
+
+    base_dir = Path(proj.doc_path).expanduser().resolve()
+    if (not base_dir.exists()) or (not base_dir.is_dir()):
+        return jsonify({"ok": False, "error": "invalid_doc_path", "message": "doc_pathが存在しないかディレクトリではありません。プロジェクト詳細で正しいパスを設定してください。"}), 400
+
+    staged = (request.args.get("staged", "0") == "1")
+
     svc = DiffService(base_dir=base_dir)
-    files = svc.latest_diffs(limit_files=100)
+    try:
+        files = svc.latest_git_diffs(staged=staged, include_untracked=True, max_files=100)
+    except ValueError as e:
+        err = str(e)
+        if err == 'not_a_git_repo':
+            return jsonify({"ok": False, "error": err, "message": ".git が見つかりません。doc_path は Git リポジトリである必要があります。"}), 400
+        return jsonify({"ok": False, "error": err, "message": "git diff の取得に失敗しました。"}), 400
+
     payload = {
+        "ok": True,
         "project_id": project_id,
-        "commit_id": None,
-        "generated_at": None,
         "files": [
             {
                 "path": f.path,

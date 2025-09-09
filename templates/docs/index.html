@@ -7,9 +7,9 @@
 
 {% block content %}
   <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h5 mb-0 text-truncate">{{ project_name }}</h1>
     <a href="{{ url_for('projects.index') }}" class="btn btn-outline-secondary btn-sm">プロジェクト一覧へ</a>
   </div>
-
   <form method="post" novalidate>
     {{ form.csrf_token }}
 
@@ -20,17 +20,22 @@
           <div class="card-header d-flex align-items-center justify-content-between">
             <span class="fw-bold">{{ form.prompt.label }}</span>
             <div class="d-flex gap-2 align-items-center">
+              <!-- モデル選択（小さめのセレクト） -->
+              <select id="model-select" class="form-select form-select-sm w-auto" title="使用するモデルを選択">
+                <option value="gpt-5" selected>gpt-5</option>
+                <option value="gpt-4o">gpt-4o</option>
+              </select>
+
               <!-- 添付: ファイルアップロード（複数可） -->
               <input type="file"
                      id="file-input"
                      class="d-none"
                      multiple
                      accept=".txt,.md,.markdown,.json,.yaml,.yml,.csv,.htm,.html,.docx,.pptx,.xlsx,.pdf,.py,.js,.ts,.java,.php,.go,.rb,.cs,.sh,.sql,.css" />
-              <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-upload-trigger">
+              <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap flex-shrink-0" style="word-break: keep-all;" id="btn-upload-trigger">
                 添付ファイルを追加
               </button>
 
-              {{ form.submit_generate(class="btn btn-primary btn-sm", id="btn-generate") }}
               {{ form.submit_generate_tool(class="btn btn-primary btn-sm", id="btn-generate_tool") }}
               {{ form.submit_commit(class="btn btn-success btn-sm", id="btn-commit") }}
             </div>
@@ -103,6 +108,12 @@
                         title="左ペインのMarkdownをコピー">
                   MDコピー
                 </button>
+                <button type="button"
+                        class="btn btn-sm btn-outline-success"
+                        id="btn-knowledge-left"
+                        title="このプロンプトを知識として保存">
+                  知識化
+                </button>
               {% endif %}
             </div>
             <div class="btn-group">
@@ -153,9 +164,9 @@
                 </button>
                 <button type="button"
                         class="btn btn-sm btn-outline-success"
-                        onclick="handleCodegen('right')"
-                        title="右ペインのMarkdownからコード生成">
-                  コード生成
+                        id="btn-knowledge-right"
+                        title="この回答を知識として保存">
+                  知識化
                 </button>
               {% endif %}
             </div>
@@ -180,14 +191,14 @@
         class="btn btn-outline-danger btn-sm"
         {% if not current_right %}disabled{% endif %}
         {% if current_right %}
-          hx-post="{{ url_for('docs.delete_memo',
+          hx-post="{{ url_for('docs.delete_history',
                               project_id=project_id,
                               memo_id=current_right.doc_id,
                               pos=pos) }}"
           hx-target="#commits-section"
           hx-select="#commits-section"
           hx-swap="outerHTML"
-          hx-confirm="右側のコミット（ID: {{ current_right.doc_id }}）を削除します。よろしいですか？"
+          hx-confirm="コミット（ID: {{ current_right.doc_id }}）を削除します。よろしいですか？"
           hx-headers='{"X-CSRFToken":"{{ form.csrf_token._value() }}"}'
         {% endif %}
       >
@@ -196,27 +207,6 @@
     </div>
   </div>
 
-  <!-- 生成結果モーダル -->
-  <div class="modal fade" id="codegenModal" tabindex="-1" aria-labelledby="codegenModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="codegenModalLabel">コード生成結果</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
-        </div>
-        <div class="modal-body">
-          <div id="codegen-status" class="text-muted mb-3">生成中…</div>
-          <div id="codegen-actions" class="d-none mb-3">
-            <a id="codegen-zip-link" class="btn btn-sm btn-primary" href="#" target="_blank" rel="noopener">ZIPをダウンロード</a>
-          </div>
-          <pre id="codegen-summary" class="bg-light p-3 rounded" style="white-space: pre-wrap;"></pre>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- ライブラリ（順序が重要） -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -291,14 +281,14 @@
 
   <!-- ページ専用スクリプト（外部JS） -->
   <div id="docs-root"
-       data-stream-url="{{ url_for('docs.stream_generate', project_id=project_id) }}"
        data-stream-url-tool="{{ url_for('docs.stream_generate_tool', project_id=project_id) }}"
-       data-codegen-url="{{ url_for('docs.codegen', project_id=project_id) }}"
        data-upload-url="{{ url_for('docs.upload', project_id=project_id) }}"
+       data-project-id="{{ project_id }}"
        {% if current_left %}
        data-left-doc-id="{{ current_left.doc_id }}"
        data-csrf="{{ form.csrf_token._value() }}"
        {% endif %}></div>
+
   <script src="{{ url_for('static', filename='js/docs_index.js') }}"></script>
   <script src="{{ url_for('static', filename='js/docs_index_diff.js') }}"></script>
 {% endblock %}

@@ -25,10 +25,9 @@
 
     {% if mode == 'edit' %}
       <div class="mb-3">
-        <label class="form-label">現在のドキュメントパス</label>
-        {# readonlyにして送信時も値が保持されるようにする（disabledは送信されない） #}
-        {{ form.doc_path(class="form-control", readonly=true) }}
-        <div class="form-text">ZIPをアップロードすると、解凍先ディレクトリで上書きされます。</div>
+        <label class="form-label">ドキュメントパス</label>
+        {{ form.doc_path(class="form-control", placeholder="/docs/path/to/file") }}
+        <div class="form-text">ZIPをアップロードした場合は解凍先のパスで上書きされます。</div>
       </div>
 
       <div class="mb-3">
