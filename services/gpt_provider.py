@@ -56,6 +56,7 @@ class GptProvider(object):
             php_tools.php_replace_function_body,
             # ネットワーク
             network_tool.fetch_url_text,
+            network_tool.fetch_url_links,
             # Git
             git_tool.git_diff_files,
             git_tool.git_diff_patch,
@@ -93,6 +94,7 @@ class GptProvider(object):
             "php_replace_function_body": php_tools.php_replace_function_body,
             # ネットワーク
             "fetch_url_text": network_tool.fetch_url_text,
+            "fetch_url_links": network_tool.fetch_url_links,
             # Git
             "git_diff_files": git_tool.git_diff_files,
             "git_diff_patch": git_tool.git_diff_patch,
@@ -121,7 +123,8 @@ class GptProvider(object):
         messages: List[Any] = [
             SystemMessage(content=(
                 "* あなたは有能なソフトウェア設計・開発のアシスタントです。"
-                "* 出力は必ず日本語で、Markdown整形（見出し・箇条書き・表など）で分かりやすく書いてください。"
+                "* 最終出力は必ず日本語で、Markdown整形（見出し・箇条書き・表など）で分かりやすく書いてください。"
+                "* マークダウンの箇条書きの際、改行を忘れないでください。- aaa\\n - bbb\\nのように改行してください"
                 "* ソースコードの提示は必ず```ソースコード```というように```を使うようにしてください"
                 "* あなたはローカル環境で動作しており、バインド済みのツールを使ってファイルシステムにアクセスできます。"
                 "* C: などの絶対パスも、ツール（find_files / read_file など）を通じて直接扱えます。"
