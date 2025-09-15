@@ -40,21 +40,26 @@ class GptProvider(object):
         self.ai_log_enabled = ai_log_enabled
 
         # ツールのバインド（LLM 側に公開する関数群）
-        # ツールのバインド（LLM 側に公開する関数群）
         self.llm_with_tool = self.llm.bind_tools([
             # FS/Text ツール
             tools.find_files,
-#            tools.write_file,
+            tools.write_file,
             tools.read_file,
             tools.list_files,
             tools.list_dirs,
-#            tools.make_dirs,
+            tools.make_dirs,
             tools.file_stat,
             tools.read_file_range,
             tools.list_python_symbols,
 #            tools.insert_code,
 #            tools.delete_code,
             tools.search_grep,
+
+            # ここから追加（LLM 編集タグ運用）
+            #tools.mark_llm_edit,
+            #tools.list_llm_edit_regions,
+            #tools.apply_edit_ops,
+
             # RAG
             rag_tools.rag_index_text,
             rag_tools.rag_update_index,
@@ -93,15 +98,21 @@ class GptProvider(object):
             "list_files": tools.list_files,
             "list_dirs": tools.list_dirs,
             "read_file": tools.read_file,
-#            "write_file": tools.write_file,
+            "write_file": tools.write_file,
             "find_files": tools.find_files,
-#            "make_dirs": tools.make_dirs,
+            "make_dirs": tools.make_dirs,
             "file_stat": tools.file_stat,
             "read_file_range": tools.read_file_range,
             "list_python_symbols": tools.list_python_symbols,
 #            "insert_code": tools.insert_code,
 #            "delete_code": tools.delete_code,
             "search_grep": tools.search_grep,
+
+            # ここから追加（LLM 編集タグ運用）
+#            "mark_llm_edit": tools.mark_llm_edit,
+#            "list_llm_edit_regions": tools.list_llm_edit_regions,
+#            "apply_edit_ops": tools.apply_edit_ops,
+
             # RAG
             "rag_build_index": rag_tools.rag_build_index,
             "rag_update_index": rag_tools.rag_update_index,
@@ -197,10 +208,10 @@ class GptProvider(object):
     ):
         messages: List[Any] = [
             SystemMessage(content=(
+                "# 役割\n"
                 "* あなたは有能なソフトウェア設計・開発のアシスタントです。\n"
                 f"* ツールを使用する際に使用するproject_idは{project_id}を使ってください。\n"
                 "* 最終出力は必ず日本語で、Markdown整形（見出し・箇条書き・表など）で分かりやすく書いてください。\n"
-                "* マークダウンの箇条書きの際、改行を忘れないでください。- aaa\\n- bbb\\nのように改行してください\n"
                 "* あなたはローカル環境で動作しており、バインド済みのツールを使ってファイルシステムにアクセスできます。\n"
                 "* C: などの絶対パスも、ツール（find_files / read_file など）を通じて直接扱えます。\n"
                 "* 『この環境からはアクセスできません』などと回答せず、必ず該当ツールを呼び出してください。\n"
@@ -209,8 +220,14 @@ class GptProvider(object):
                 "* ファイルを読む前にfile_statでファイルサイズを取得し、大きなファイルの場合はread_file_rangeを使ってください\n"
             )),
             SystemMessage(content=(
-                "gitに関するガイド:\n"
+                "# gitに関するガイド:\n"
                 "- 差分を求められた場合、特段指示がなければgit_diff_own_changes_filesで差分を取得してください。\n"
+            )),
+
+            SystemMessage(content=(
+                "# ソースコード修正時のガイド:\n"
+                "- 500行以下のファイルの場合、新しくソースプログラムをwrite_fileで書き換える。\n"
+                "- 500行より大きいファイルの場合、ソースは変更せず、修正が必要な分をメッセージで表示する\n"
             )),
         ]
 

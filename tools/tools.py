@@ -5,6 +5,8 @@ import re
 import fnmatch
 import time
 import ast
+import hashlib
+import uuid
 from typing import List, Dict, Optional
 from langchain_core.tools import tool
 from services.project_service import ProjectService
@@ -1298,3 +1300,620 @@ def search_grep(
     })
 
     return json.dumps(result, ensure_ascii=False)
+
+
+# 追記: 内部ヘルパ（@tool ではありません）
+def _compute_sha256(text: str) -> str:
+    h = hashlib.sha256()
+    h.update(text.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _detect_comment_tokens(file_path: str) -> tuple[str, str]:
+    """
+    ファイル拡張子から、コメントの prefix/suffix を推定して返す。
+    - prefix: 行頭に付与するトークン（'//', '#', '/*', '<!--' など）
+    - suffix: 行末に付与するトークン（'*/', '-->' など。行コメントの場合は ''）
+
+    例:
+      .py -> ('#', '')
+      .js/.ts/.java/.c/.cpp/.cs/.go/.php -> ('//', '')
+      .css -> ('/*', '*/')
+      .html/.htm/.xml/.vue -> ('<!--', '-->')
+      その他 -> ('#', '')
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext in {".py", ".rb", ".sh", ".ps1", ".ini", ".cfg", ".conf", ".yaml", ".yml", ".toml"}:
+        return "#", ""
+    if ext in {".js", ".mjs", ".cjs", ".ts", ".java", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".php", ".swift", ".kt",
+               ".kts", ".scala"}:
+        return "//", ""
+    if ext in {".css"}:
+        return "/*", "*/"
+    if ext in {".html", ".htm", ".xml", ".vue"}:
+        return "<!--", "-->"
+    # デフォルトは行コメント記号
+    return "#", ""
+
+
+def _scan_llm_edit_regions(text: str) -> list[dict]:
+    """
+    ファイル本文から LLM_EDIT タグの START/END を走査し、範囲と属性を抽出する。
+    返り値: [{label, id, start_line, end_line, file_sha?, region_sha?}, ...]
+    - ネスト/重複はこの段階では検出しない（呼出側で検証）
+    """
+    regions = []
+    start_stack = []
+    # START/END を含む全行を列挙
+    # 形式例:
+    #   // <LLM_EDIT:UserController::update START id=u-1 file_sha=... region_sha=...>
+    #   <!-- <LLM_EDIT:... START ...> -->
+    #   # <LLM_EDIT:... END id=u-1>
+    start_re = re.compile(r"<LLM_EDIT:(?P<label>[^>]+?)\s+START(?P<attrs>[^>]*)>")
+    end_re = re.compile(r"<LLM_EDIT:(?P<label>[^>]+?)\s+END(?P<attrs>[^>]*)>")
+    lines = text.splitlines(keepends=False)
+    for i, line in enumerate(lines, start=1):
+        m1 = start_re.search(line)
+        if m1:
+            attrs = m1.group("attrs") or ""
+            kv = {}
+            for tok in attrs.strip().split():
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv[k.strip()] = v.strip()
+            start_stack.append({
+                "label": m1.group("label").strip(),
+                "id": kv.get("id", ""),  # あれば拾う
+                "file_sha": kv.get("file_sha"),
+                "region_sha": kv.get("region_sha"),
+                "start_line": i,
+            })
+            continue
+        m2 = end_re.search(line)
+        if m2:
+            attrs = m2.group("attrs") or ""
+            kv = {}
+            for tok in attrs.strip().split():
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv[k.strip()] = v.strip()
+            # 直近の START と対応付け（同一ラベル / id を優先）
+            if not start_stack:
+                # 対応しない END（不整合）は無視（上位で検査）
+                continue
+            start = start_stack.pop()
+            # id が両方にあって異なる場合などの不整合は上位で判定
+            regions.append({
+                "label": start["label"],
+                "id": start.get("id") or kv.get("id", ""),
+                "start_line": int(start["start_line"]),
+                "end_line": int(i),
+                "file_sha": start.get("file_sha"),
+                "region_sha": start.get("region_sha"),
+            })
+    # ここではネスト/重複の詳細検査はせず返却
+    regions.sort(key=lambda r: r["start_line"])
+    return regions
+
+
+def _validate_no_overlap(regions: list[dict], new_s: int, new_e: int) -> None:
+    """
+    既存のタグ領域と [new_s, new_e] が重ならないことを検証（ネスト・交差を禁止）。
+    START/END を含む行で囲むため、[new_s, new_e] は実コンテンツ行（タグ挿入前）を想定。
+    """
+    for r in regions:
+        # 既存領域のコンテンツ範囲は (start_line+1) .. (end_line-1)
+        s = r["start_line"] + 1
+        e = r["end_line"] - 1
+        if s <= new_e and new_s <= e:
+            raise ValueError(
+                f"overlap_with_existing_region: [{new_s}-{new_e}] vs [{s}-{e}] ({r.get('label')} id={r.get('id')})")
+
+
+@tool
+def mark_llm_edit(
+        file_path: str,
+        region_label: str,
+        start_line: int,
+        end_line: int,
+        *,
+        project_id: int,
+        region_id: Optional[str] = None,
+) -> str:
+    """
+    指定の行範囲を LLM 編集許可ゾーンとしてタグで囲みます（START/END を挿入）。
+    - タグ形式: <LLM_EDIT:{region_label} START id=... file_sha=... region_sha=...> / END id=...
+    - file_sha はファイル全文の SHA256、region_sha は対象範囲の SHA256
+    - タグのネスト/重複はエラー
+    - 1ファイルに複数タグ可（id は一意を推奨）
+
+    Args:
+        file_path: 対象ファイル（相対は doc_path 基準）
+        region_label: 人が読める識別子（例 "UserController::update"）
+        start_line: タグで囲む開始行（1始まり、開始行を含む）
+        end_line: タグで囲む終了行（1始まり、終了行を含む）
+        project_id: 必須。doc_path 解決に使用
+        region_id: 明示ID（省略時は短いUUIDを自動採番）
+
+    Returns(JSON):
+        {
+          "ok": true/false,
+          "path": "...",               # 実パス（doc_path配下）
+          "inserted_start_line": int,  # STARTマーカを入れた行番号
+          "inserted_end_line": int,    # ENDマーカを入れた行番号
+          "label": "...",
+          "id": "...",
+          "file_sha": "...",
+          "region_sha": "...",
+          "error"?: "..."
+        }
+    """
+    out: Dict[str, object] = {"ok": False, "path": file_path, "label": region_label}
+    try:
+        if not region_label or not str(region_label).strip():
+            out["error"] = "region_label_required"
+            return json.dumps(out, ensure_ascii=False)
+
+        # doc_path を解決
+        base = _resolve_doc_path(project_id)
+        p = Path(file_path).expanduser()
+        if not p.is_absolute():
+            p = base / p
+        p = p.resolve()
+        try:
+            _ = p.relative_to(base)
+        except Exception:
+            out["error"] = f"path_must_be_under_doc_path (got: {p}, doc_path: {base})"
+            return json.dumps(out, ensure_ascii=False)
+        out["path"] = str(p)
+
+        if not p.exists() or not p.is_file():
+            out["error"] = "file_not_found"
+            return json.dumps(out, ensure_ascii=False)
+
+        # 読み込み
+        src = p.read_text(encoding="utf-8", errors="ignore")
+        lines = src.splitlines(keepends=True)
+        n = len(lines)
+        if n == 0:
+            out["error"] = "empty_file"
+            return json.dumps(out, ensure_ascii=False)
+
+        # 行範囲の正規化
+        s = max(1, int(start_line))
+        e = max(s, int(end_line))
+        if s > n:
+            out["error"] = f"start_line_out_of_range (max={n})"
+            return json.dumps(out, ensure_ascii=False)
+        e = min(e, n)
+
+        # 既存タグの走査
+        regions = _scan_llm_edit_regions(src)
+
+        # id が未指定なら生成（重複しないようにリトライ）
+        rid = (region_id or uuid.uuid4().hex[:8])
+        if any((r.get("id") == rid) for r in regions if r.get("id")):
+            # 簡易に再生成
+            rid = uuid.uuid4().hex[:8]
+
+        # 既存タグと重ならないか検証（コンテンツ範囲ベースで検査）
+        _validate_no_overlap(regions, s, e)
+
+        # ハッシュ
+        file_sha = _compute_sha256(src)
+        region_text = "".join(lines[s - 1:e])
+        region_sha = _compute_sha256(region_text)
+
+        # コメントトークン
+        prefix, suffix = _detect_comment_tokens(str(p))
+
+        def mk_marker(kind: str) -> str:
+            # kind: "START" | "END"
+            attrs = f"id={rid}"
+            if kind == "START":
+                attrs += f" file_sha={file_sha} region_sha={region_sha}"
+            core = f"<LLM_EDIT:{region_label} {kind} {attrs}>"
+            if prefix in {"/*", "<!--"} and suffix:
+                return f"{prefix} {core} {suffix}\n"
+            else:
+                return f"{prefix} {core}\n"
+
+        start_marker = mk_marker("START")
+        end_marker = mk_marker("END")
+
+        # 挿入位置（0始まり）
+        s_idx = s - 1
+        e_idx = e  # スライスは終端非含（e は人間1始まりの含むなのでそのままOK）
+
+        # START を s_idx に挿入 → END は挿入後の e_idx+1 に
+        lines[s_idx:s_idx] = [start_marker]
+        e_idx = e_idx + 1
+        lines[e_idx:e_idx] = [end_marker]
+
+        # 書き戻し
+        p.write_text("".join(lines), encoding="utf-8")
+
+        out.update({
+            "ok": True,
+            "inserted_start_line": s_idx + 1,
+            "inserted_end_line": e_idx + 1,
+            "id": rid,
+            "file_sha": file_sha,
+            "region_sha": region_sha,
+        })
+        return json.dumps(out, ensure_ascii=False)
+
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return json.dumps(out, ensure_ascii=False)
+
+
+@tool
+def list_llm_edit_regions(file_path: str, project_id: int) -> str:
+    """
+    ファイル内の LLM_EDIT タグ（START/END）を抽出し、範囲・属性を一覧で返します。
+    - ネスト/不整合が疑われる場合は warning を付けます（厳密検証は mark/apply 側で実施推奨）
+
+    Args:
+        file_path: 対象ファイル（相対は doc_path 基準）
+        project_id: 必須。doc_path 解決に使用
+
+    Returns(JSON):
+        {
+          "ok": true/false,
+          "path": "...",
+          "regions": [
+            { "label": "...", "id": "...", "start_line": 10, "end_line": 40, "file_sha": "...", "region_sha": "..." },
+            ...
+          ],
+          "warnings": ["..."]?
+          "error"?: "..."
+        }
+    """
+    out: Dict[str, object] = {"ok": False, "path": file_path, "regions": []}
+    try:
+        base = _resolve_doc_path(project_id)
+        p = Path(file_path).expanduser()
+        if not p.is_absolute():
+            p = base / p
+        p = p.resolve()
+        try:
+            _ = p.relative_to(base)
+        except Exception:
+            out["error"] = f"path_must_be_under_doc_path (got: {p}, doc_path: {base})"
+            return json.dumps(out, ensure_ascii=False)
+        out["path"] = str(p)
+
+        if not p.exists() or not p.is_file():
+            out["ok"] = True  # 空の一覧を返す
+            return json.dumps(out, ensure_ascii=False)
+
+        src = p.read_text(encoding="utf-8", errors="ignore")
+        regions = _scan_llm_edit_regions(src)
+        out["regions"] = regions
+        out["ok"] = True
+
+        # 簡易な不整合検出（ネスト/重複）
+        warnings = []
+        # 既存領域のコンテンツ範囲で重なりチェック
+        content_ranges = []
+        for r in regions:
+            s = r["start_line"] + 1
+            e = r["end_line"] - 1
+            content_ranges.append((s, e, r))
+        content_ranges.sort()
+        for i in range(1, len(content_ranges)):
+            a = content_ranges[i - 1]
+            b = content_ranges[i]
+            if a[0] <= b[1] and b[0] <= a[1]:
+                warnings.append(
+                    f"overlap_suspected: {a[2].get('label')} (id={a[2].get('id')}) vs {b[2].get('label')} (id={b[2].get('id')})")
+        if warnings:
+            out["warnings"] = warnings
+
+        return json.dumps(out, ensure_ascii=False)
+
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return json.dumps(out, ensure_ascii=False)
+
+
+@tool
+def apply_edit_ops(
+        project_id: int,
+        patch_json: str,
+        dry_run: bool = False,
+) -> str:
+    """
+    構造化パッチ（JSON）を検証し、タグ領域の内側だけに安全に適用します。
+    - doc_path 強制（相対は doc_path 連結、doc_path 外は拒否）
+    - base_sha256（ファイル全文SHA）の一致を検証（不一致時はエラー）
+    - 各 op の old_hash を検証（不一致時はエラー）
+    - タグ越境の編集はエラー
+    - 削除行の総数は deletions_max_lines 以下に制限
+    - dry_run=True のときは適用せず検証と差分計測のみ
+
+    Patch JSON フォーマット（要旨）:
+    {
+      "file": "path/under/doc_path",
+      "base_sha256": "...",
+      "deletions_max_lines": 6,
+      "ops": [
+        {
+          "op": "replace_range" | "insert_after" | "delete_range",
+          "region_id": "upd-1",                # 推奨
+          "region_label": "UserController::update",
+          "anchor": "def update(",             # 正規表現可（regex=true）
+          "regex": false,
+          "occurrence": "first" | "last" | "nth",
+          "nth": 1,
+          "range": { "before": 0, "after": 10 },
+          "old_hash": "sha256-of-slice",       # replace_range の検証用（推奨）
+          "new_code": "...."                   # replace_range / insert_after のみ
+        },
+        ...
+      ]
+    }
+
+    Returns(JSON):
+      {
+        "ok": true/false,
+        "path": "...",
+        "dry_run": false,
+        "applied_ops": 2,
+        "deleted_lines": 3,
+        "updated_regions": 2,
+        "updated_file_sha": "...",
+        "warnings": [...],
+        "errors": [...],            # 個別opのエラー等
+      }
+    """
+    out: Dict[str, object] = {
+        "ok": False, "dry_run": bool(dry_run),
+        "applied_ops": 0, "deleted_lines": 0, "updated_regions": 0,
+        "warnings": [], "errors": []
+    }
+    try:
+        # 1) JSON パース
+        try:
+            patch = json.loads(patch_json)
+        except Exception as e:
+            out["errors"].append(f"invalid_json: {type(e).__name__}: {e}")
+            return json.dumps(out, ensure_ascii=False)
+
+        # 入力必須の最低限
+        rel_path = patch.get("file") or ""
+        base_sha = patch.get("base_sha256") or ""
+        ops = patch.get("ops") or []
+        deletions_max = int(patch.get("deletions_max_lines", 6))
+
+        if not rel_path or not isinstance(ops, list) or not ops:
+            out["errors"].append("missing_required_fields(file/ops)")
+            return json.dumps(out, ensure_ascii=False)
+
+        # 2) doc_path を解決 → パス検証
+        base = _resolve_doc_path(project_id)  # -> Path
+        p = Path(rel_path).expanduser()
+        if not p.is_absolute():
+            p = base / p
+        p = p.resolve()
+        try:
+            _ = p.relative_to(base)
+        except Exception:
+            out["errors"].append(f"path_must_be_under_doc_path: {p}")
+            return json.dumps(out, ensure_ascii=False)
+        out["path"] = str(p)
+
+        if not p.exists() or not p.is_file():
+            out["errors"].append("file_not_found")
+            return json.dumps(out, ensure_ascii=False)
+
+        # 3) ファイル読込（改行維持）
+        original_text = p.read_text(encoding="utf-8", errors="ignore")
+        original_lines = original_text.splitlines(keepends=True)
+
+        # base_sha 検証
+        current_file_sha = _compute_sha256(original_text)
+        if base_sha and base_sha != current_file_sha:
+            out["errors"].append("base_sha_mismatch")
+            return json.dumps(out, ensure_ascii=False)
+
+        # 4) タグ走査（領域一覧）
+        regions = _scan_llm_edit_regions(original_text)
+        if not regions:
+            out["errors"].append("no_llm_edit_regions")
+            return json.dumps(out, ensure_ascii=False)
+
+        # 5) ops を region ごとに振り分け
+        #    region のコンテンツ範囲: (start_line+1) .. (end_line-1) [1始まり・両端含む]
+        def to_range_tuple(r):
+            return (int(r["start_line"]), int(r["end_line"]), r.get("label", ""), r.get("id", ""))
+
+        # regionを探索するヘルパ（region_id優先→region_label）
+        def _find_region_for_op(op) -> Optional[dict]:
+            rid = op.get("region_id") or ""
+            rlabel = op.get("region_label") or ""
+            cand = []
+            for r in regions:
+                if rid and r.get("id") == rid:
+                    cand.append(r)
+                elif (not rid) and rlabel and r.get("label") == rlabel:
+                    cand.append(r)
+            if not cand:
+                return None
+            if len(cand) > 1:
+                # 同名ラベルの重複などで曖昧
+                return None
+            return cand[0]
+
+        # コンテンツ内で anchor の行を探す
+        def _find_anchor_in_region(content_lines: List[str], op: dict) -> Optional[int]:
+            anchor = op.get("anchor") or ""
+            if not anchor:
+                return None
+            regex = bool(op.get("regex", False))
+            occurrence = (op.get("occurrence") or "first").lower()
+            nth = int(op.get("nth", 1))
+            matches: List[int] = []
+            if regex:
+                try:
+                    pat = re.compile(anchor)
+                except re.error:
+                    return None
+                for idx, text in enumerate(content_lines, start=1):
+                    if pat.search(text):
+                        matches.append(idx)
+            else:
+                for idx, text in enumerate(content_lines, start=1):
+                    if anchor in text:
+                        matches.append(idx)
+            if not matches:
+                return None
+            if occurrence == "first":
+                return matches[0]
+            if occurrence == "last":
+                return matches[-1]
+            if occurrence == "nth":
+                if 1 <= nth <= len(matches):
+                    return matches[nth - 1]
+                return None
+            return matches[0]
+
+        # region別に ops をまとめる（実適用時は regionごとに処理）
+        region_ops: Dict[str, List[dict]] = {}  # key: region_key "<label>#<id>"
+        key_to_region: Dict[str, dict] = {}
+
+        for op in ops:
+            r = _find_region_for_op(op)
+            if not r:
+                out["errors"].append(f"region_not_found_or_ambiguous: {op.get('region_id') or op.get('region_label')}")
+                return json.dumps(out, ensure_ascii=False)
+            key = f"{r.get('label', '')}#{r.get('id', '')}"
+            region_ops.setdefault(key, []).append(op)
+            key_to_region[key] = r
+
+        # original_lines をベースに段階的に編集
+        current_lines = original_lines[:]
+        total_deleted = 0
+        total_applied = 0
+
+        # 各 region ごとに適用
+        for key, ops_list in region_ops.items():
+            r = key_to_region[key]
+            start_line = int(r["start_line"])
+            end_line = int(r["end_line"])
+            # コンテンツ領域
+            content_start = start_line + 1
+            content_end = end_line - 1
+            if content_start > content_end:
+                out["errors"].append(f"empty_region: {key}")
+                return json.dumps(out, ensure_ascii=False)
+
+            # 現在のテキストから当該領域を抽出
+            # 0始まりインデックスに変換
+            cs_idx = content_start - 1
+            ce_idx = content_end  # スライス終端（非含）
+            region_content = current_lines[cs_idx:ce_idx]
+
+            # ops を順に適用（アンカーは現テキストに対して都度検索）
+            for op in ops_list:
+                op_kind = op.get("op")
+                if op_kind not in ("replace_range", "insert_after", "delete_range"):
+                    out["errors"].append(f"invalid_op: {op_kind}")
+                    return json.dumps(out, ensure_ascii=False)
+
+                # anchor基準行
+                base_line = _find_anchor_in_region(region_content, op)
+                if not base_line:
+                    out["errors"].append(f"anchor_not_found: {op.get('anchor')}")
+                    return json.dumps(out, ensure_ascii=False)
+
+                rng = op.get("range") or {"before": 0, "after": 0}
+                before_n = max(0, int(rng.get("before", 0)))
+                after_n = max(0, int(rng.get("after", 0)))
+
+                # 対象範囲（1始まり・両端含む）: base_line-before .. base_line+after
+                s = max(1, base_line - before_n)
+                e = min(len(region_content), base_line + after_n)
+
+                if op_kind == "replace_range":
+                    # old_hash 検証
+                    old_slice = "".join(region_content[s - 1:e])
+                    old_hash = op.get("old_hash") or ""
+                    if old_hash and _compute_sha256(old_slice) != old_hash:
+                        out["errors"].append("old_hash_mismatch")
+                        return json.dumps(out, ensure_ascii=False)
+                    # 置換
+                    new_code = op.get("new_code") or ""
+                    new_lines = new_code.splitlines(keepends=True)
+                    region_content[s - 1:e] = new_lines
+                    total_applied += 1
+
+                elif op_kind == "insert_after":
+                    insert_index = e  # afterの位置の直後に差し込む
+                    new_code = op.get("new_code") or ""
+                    new_lines = new_code.splitlines(keepends=True)
+                    region_content[insert_index:insert_index] = new_lines
+                    total_applied += 1
+
+                elif op_kind == "delete_range":
+                    del_count = e - (s - 1)
+                    if del_count > 0:
+                        region_content[s - 1:e] = []
+                        total_deleted += del_count
+                        total_applied += 1
+
+                if deletions_max >= 0 and total_deleted > deletions_max:
+                    out["errors"].append("deletions_budget_exceeded")
+                    return json.dumps(out, ensure_ascii=False)
+
+            # 当該 region の反映（current_lines に戻す）
+            current_lines[cs_idx:ce_idx] = region_content
+
+        # 適用後の全文
+        new_text = "".join(current_lines)
+        new_file_sha = _compute_sha256(new_text)
+
+        # 6) START タグの file_sha / region_sha を更新
+        #    現在のテキストで regions を再スキャンし、各 START 行を書き換える
+        if not dry_run:
+            updated_lines = current_lines[:]
+            updated_text_for_scan = new_text
+            new_regions = _scan_llm_edit_regions(updated_text_for_scan)
+
+            # START 行に含まれる file_sha / region_sha を置換
+            def _replace_marker_hashes_in_line(line: str, new_file_sha: str, new_region_sha: str) -> str:
+                # file_sha=... / region_sha=... を置き換える（存在前提）
+                line = re.sub(r"file_sha=\\S+", f"file_sha={new_file_sha}", line)
+                line = re.sub(r"region_sha=\\S+", f"region_sha={new_region_sha}", line)
+                return line
+
+            # 行配列で直接置換するために1始まり→0始まり変換
+            for r in new_regions:
+                start_line = int(r["start_line"])  # START マーカーの行
+                content_start = start_line + 1
+                content_end = int(r["end_line"]) - 1
+                if content_start <= content_end:
+                    region_slice = "".join(updated_lines[content_start - 1:content_end])
+                    region_sha_now = _compute_sha256(region_slice)
+                else:
+                    # から領域
+                    region_sha_now = _compute_sha256("")
+                idx0 = start_line - 1
+                updated_lines[idx0] = _replace_marker_hashes_in_line(updated_lines[idx0], new_file_sha, region_sha_now)
+
+            # 書き戻し
+            p.write_text("".join(updated_lines), encoding="utf-8")
+
+        out.update({
+            "ok": True,
+            "applied_ops": int(total_applied),
+            "deleted_lines": int(total_deleted),
+            "updated_regions": len(region_ops),
+            "updated_file_sha": new_file_sha,
+        })
+        return json.dumps(out, ensure_ascii=False)
+
+    except Exception as e:
+        out["errors"].append(f"{type(e).__name__}: {e}")
+        return json.dumps(out, ensure_ascii=False)

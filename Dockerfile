@@ -23,6 +23,8 @@ RUN apt-get update \
 # Install deps (requirements.txt must be UTF-8)
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+RUN git config --system safe.directory '*'
+
 
 # Copy app
 COPY . .

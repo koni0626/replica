@@ -118,3 +118,4 @@ cython_debug/
 # virtual env
 .venv/
 migrations/
+.env
