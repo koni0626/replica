@@ -55,7 +55,17 @@
     // 危険なタグ（script/style/iframe）の開始記号をエスケープして生HTML解釈を防ぐ
     const safeMd = md.replace(/<(?=\/?(script|style|iframe)\b)/gi, '&lt;');
     const dirty = marked.parse(safeMd);
-    const html = DOMPurify.sanitize(dirty);
+    // 厳格サニタイズ: インタラクティブ/フォーム系要素を禁止し、属性も制限
+    const sanitizeOptions = {
+      FORBID_TAGS: ['button','form','input','select','textarea','style','script','iframe','object','embed','link','meta'],
+      ALLOWED_TAGS: [
+        'a','p','br','blockquote','ul','ol','li','pre','code','span','strong','em','del','hr',
+        'h1','h2','h3','h4','h5','h6','table','thead','tbody','tr','th','td','img'
+      ],
+      ALLOWED_ATTR: ['href','title','alt','src','class','id','lang','dir','width','height','align','colspan','rowspan','scope','target','rel'],
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|data|mailto):|[^a-z]|[a-z+\.\-]+(?:[^a-z+\.\-:]|$))/i,
+    };
+    const html = DOMPurify.sanitize(dirty, sanitizeOptions);
     targetEl.innerHTML = html;
   }
   const contentInput = document.getElementById("content-input");

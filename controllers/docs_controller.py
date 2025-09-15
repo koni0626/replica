@@ -17,16 +17,7 @@ from services.project_service import ProjectService
 
 docs_bp = Blueprint("docs", __name__)
 
-ALLOWED_UPLOAD_EXTS = {
-    # 必須セット（フェーズ1）
-    "txt", "md", "markdown",
-    "csv", "json", "yaml", "yml", "html", "htm", "docx", "pptx", "xlsx", "pdf",
-    # コード系（テキストとして取り扱い）
-    "py", "js", "ts", "java", "php", "go", "rb", "cs", "sh", "sql", "css"
-}
-
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB/ファイル（必要に応じて調整）
-
+from services.search_path_service import SearchPathService
 
 # ==========================
 # 生成ZIPの安全ダウンロード用（既存）
@@ -76,9 +67,6 @@ def _safe_file_within_allowed_roots(abs_path: str | Path) -> Path:
     if not any(root in p.parents for root in roots):
         abort(400, description="invalid path")
     return p
-
-
-# ==========================
 # メディア（添付ファイル）関連
 # ==========================
 
@@ -312,7 +300,6 @@ def stream_generate_tool(project_id: int):
 
     return Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
 
-
 @docs_bp.route("/<int:project_id>/diff/latest", methods=["GET"])
 @login_required
 def latest_diff(project_id: int):
@@ -357,3 +344,40 @@ def latest_diff(project_id: int):
         ],
     }
     return jsonify(payload)
+
+@docs_bp.route("/<int:project_id>/search_paths", methods=["GET"])
+@login_required
+def search_paths(project_id: int):
+    pj = ProjectService().fetch_by_id(project_id)
+    if not pj or not getattr(pj, 'doc_path', None):
+        flash("このプロジェクトのdoc_pathが設定されていません。プロジェクト詳細で設定してください。", "warning")
+        return redirect(url_for('docs.index', project_id=project_id))
+    return render_template('docs/search_paths.html', project_id=project_id, doc_path=pj.doc_path)
+
+
+@docs_bp.route("/<int:project_id>/search_tree", methods=["GET"])
+@login_required
+def search_tree(project_id: int):
+    try:
+        rel = (request.args.get('rel') or '').strip()
+        tree = SearchPathService().build_tree(project_id, rel=rel)
+        return jsonify(tree)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@docs_bp.route("/<int:project_id>/search_paths_state", methods=["GET", "POST"])
+@login_required
+def search_paths_state(project_id: int):
+    if request.method == "GET":
+        state = SearchPathService().load_state(project_id)
+        return jsonify(state)
+
+    data = request.get_json(silent=True) or {}
+    includes = data.get('includes') or []
+    excludes = data.get('excludes') or []
+    # 正規化（文字列配列のみ許可）
+    inc = [str(x).strip().replace('\\\\', '/').strip('/') for x in includes if isinstance(x, (str,))]
+    exc = [str(x).strip().replace('\\\\', '/').strip('/') for x in excludes if isinstance(x, (str,))]
+    saved = SearchPathService().save_state(project_id, inc, exc)
+    return jsonify({"ok": True, **saved})

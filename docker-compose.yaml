@@ -1,0 +1,28 @@
+version: "3.9"
+
+volumes:
+  systemgen_instance: {}
+
+services:
+  systemgen:
+    build: .
+    image: systemgen:latest
+    container_name: systemgen
+    env_file:
+      - .env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TZ: ${TZ:-Asia/Tokyo}
+      PYTHONUNBUFFERED: "1"
+      PYTHON_PATH: ${PYTHON_PATH:-/app}
+    ports:
+      - "5000:5000"
+    volumes:
+      - type: bind
+        source: ${DOCS_HOST_PATH:-./docs}
+        target: /docs
+      - type: volume
+        source: systemgen_instance
+        target: ${PYTHON_PATH:-/app}/instance
+    command: ["python", "app.py"]
+    restart: unless-stopped

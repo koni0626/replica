@@ -56,7 +56,17 @@
       // Markdown -> HTML（marked が無い場合は素通し）
       const dirty = window.marked ? window.marked.parse(safeMd) : safeMd;
       // サニタイズ（DOMPurify が無い場合は素通し）
-      const html  = window.DOMPurify ? window.DOMPurify.sanitize(dirty) : dirty;
+      // 厳格サニタイズ: インタラクティブ/フォーム系要素を禁止し、属性も制限
+      const sanitizeOptions = {
+        FORBID_TAGS: ['button','form','input','select','textarea','style','script','iframe','object','embed','link','meta'],
+        ALLOWED_TAGS: [
+          'a','p','br','blockquote','ul','ol','li','pre','code','span','strong','em','del','hr',
+          'h1','h2','h3','h4','h5','h6','table','thead','tbody','tr','th','td','img'
+        ],
+        ALLOWED_ATTR: ['href','title','alt','src','class','id','lang','dir','width','height','align','colspan','rowspan','scope','target','rel'],
+        ALLOWED_URI_REGEXP: /^(?:(?:https?|data|mailto):|[^a-z]|[a-z+\.\-]+(?:[^a-z+\.\-:]|$))/i,
+      };
+      const html  = window.DOMPurify ? window.DOMPurify.sanitize(dirty, sanitizeOptions) : dirty;
       targetEl.innerHTML = html;
 
       // スタイル補助クラス付与（見た目向上）

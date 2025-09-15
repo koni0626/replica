@@ -147,7 +147,8 @@ def main():
 
     messages = [
         SystemMessage("あなたはリポジトリのファイル一覧を手伝うAIです。"),
-        HumanMessage(r"C:\Users\konishi\PycharmProjects\SystemGen\testの下にあるファイル一覧を教えてください"),
+        HumanMessage(r"C:\Users\konishi\PycharmProjects\SystemGen2の下にあるファイル一覧を教えてください"),
+        HumanMessage(r"取得したファイルのファイルサイズをすべて教えてください"),
     ]
 
     turn = 0

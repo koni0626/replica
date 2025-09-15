@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}検索パス{% endblock %}
+
+{% block sidebar %}
+  {% include 'docs/doc_sidebar.html' %}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h5 mb-0">検索パス</h1>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" id="btn-expand">全展開</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-collapse">全折りたたみ</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-select-all">全選択</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-unselect-all">全解除</button>
+    <div class="btn-group">
+      <button class="btn btn-outline-primary btn-sm" id="btn-apply-flask">Flask 既定</button>
+      <button class="btn btn-outline-primary btn-sm" id="btn-apply-cake">CakePHP4 既定</button>
+    </div>
+    <a href="{{ url_for('docs.index', project_id=project_id) }}" class="btn btn-outline-secondary btn-sm">戻る</a>
+    <button class="btn btn-primary btn-sm" id="btn-save">保存</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div>
+      <div class="small text-muted">doc_path: {{ doc_path }}</div>
+      <div class="small">選択数: <span id="sel-count">0</span> / 除外: <span id="exc-count">0</span></div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="mb-2" id="tree-loading" aria-live="polite">
+      <div class="d-flex align-items-center gap-2 text-muted">
+        <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+        <span>ツリーを読み込んでいます…</span>
+      </div>
+    </div>
+    <div id="tree-root"></div>
+  </div>
+</div>
+
+<script>
+  window.SEARCH_PATHS_BOOT = {
+    projectId: {{ project_id }},
+    endpoints: {
+      tree: "{{ url_for('docs.search_tree', project_id=project_id) }}",
+      stateGet: "{{ url_for('docs.search_paths_state', project_id=project_id) }}",
+      statePost: "{{ url_for('docs.search_paths_state', project_id=project_id) }}",
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/docs_search_paths.js') }}?v={{ project_id }}"></script>
+<meta name="csrf-token" content="{{ csrf_token() }}">
+{% endblock %}
