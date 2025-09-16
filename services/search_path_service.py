@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Any
 
@@ -67,7 +68,8 @@ class SearchPathService:
     def build_tree(self, project_id: int, rel: str = "") -> List[Dict[str, Any]]:
         """
         doc_path 配下のディレクトリツリーを返す（配列）。
-        - vendor/.github/logs/tmp は除外
+        - vendor/.github/logs/tmp は除外（深さ無制限でサブツリーごと除外）
+        - search_paths.json の excludes も除外（先頭一致でサブツリーごと除外）
         - rel（相対パス）でサブツリー取得にも対応
         返却ノード: { name, rel, children: [...] }
         """
@@ -83,24 +85,62 @@ class SearchPathService:
         if not start.exists() or not start.is_dir():
             start = base
 
+        # 除外パスの準備（prefix一致で除外）。ドキュメント化されている既定の除外 + ユーザー設定
+        state = self.load_state(project_id)
+        exclude_prefixes: List[str] = []
+        default_excludes = ["vendor", ".github", "logs", "tmp"]
+        # state の excludes は相対パス前提。正規化して prefix 用に末尾スラッシュ付与
+        for s in (state.get("excludes") or []) + default_excludes:
+            s = str(s).strip().replace("\\", "/").strip("/")
+            if not s:
+                continue
+            exclude_prefixes.append(s + "/")
+
+        def is_excluded(rel_path: str) -> bool:
+            rp = rel_path.replace("\\", "/").strip("/")
+            rp_slash = rp + "/"
+            for pre in exclude_prefixes:
+                if rp_slash.startswith(pre):
+                    return True
+            return False
+
         def _walk(dir_path: Path, prefix: str = "") -> List[Dict[str, Any]]:
             out: List[Dict[str, Any]] = []
+            # scandir でファイルを列挙しつつ、ディレクトリのみを効率的に抽出
             try:
-                for p in sorted([x for x in dir_path.iterdir() if x.is_dir()]):
-                    name = p.name
-                    rel_child = f"{prefix}{name}" if not prefix else f"{prefix}{name}"
-                    children = _walk(p, rel_child + "/")
-                    out.append({
-                        "name": name,
-                        "rel": rel_child.rstrip("/"),
-                        "children": children,
-                    })
+                with os.scandir(dir_path) as it:
+                    dirs = []
+                    for entry in it:
+                        try:
+                            if not entry.is_dir(follow_symlinks=False):
+                                continue
+                        except Exception:
+                            continue
+                        name = entry.name
+                        rel_child = f"{prefix}{name}" if not prefix else f"{prefix}{name}"
+                        if is_excluded(rel_child):
+                            continue
+                        dirs.append((name, entry.path))
             except Exception:
-                return out
+                dirs = []
+            # 名前順にソート（大文字小文字を無視）
+            dirs.sort(key=lambda t: t[0].lower())
+
+            for name, path_str in dirs:
+                rel_child = f"{prefix}{name}" if not prefix else f"{prefix}{name}"
+                children = _walk(Path(path_str), rel_child + "/")
+                out.append({
+                    "name": name,
+                    "rel": rel_child.rstrip("/"),
+                    "children": children,
+                })
             return out
 
-        # rel指定がある場合は、その直下のツリーのみ返す（Lazy Load用途）。
+        # rel 指定がある場合は、その直下のツリーのみ返す（Lazy Load用途）。
         prefix = "" if start == base else (str(start.relative_to(base)).replace("\\", "/").rstrip("/") + "/")
+        # 開始地点が除外配下の場合は、上位の呼び出し側が rel を誤っているので空ツリーを返す
+        if prefix and is_excluded(prefix.rstrip("/")):
+            return []
         return _walk(start, prefix)
 
     @staticmethod
