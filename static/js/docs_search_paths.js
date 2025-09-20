@@ -22,7 +22,8 @@
 
   // 状態
   let savedState = { includes: [], excludes: [] };
-  const cache = new Map(); // rel -> nodes[]
+  const cache = new Map(); // rel -> nodes[]（ロード済み）
+  const inFlight = new Map(); // rel -> Promise（ロード中ガード）
 
   function setLoading(v){
     if(!$loading) return;
@@ -80,43 +81,69 @@
   }
 
   function renderNodes($ul, nodes){
+    if(!$ul) return;
+    // 既に子が存在する場合は重複追加を避ける
+    if($ul.children && $ul.children.length > 0) return;
     const html = nodes.map(nodeTemplate).join('');
     $ul.insertAdjacentHTML('beforeend', html);
   }
 
   async function loadChildren(li){
     const rel = li.dataset.rel || '';
+    const ul = li.querySelector(':scope > ul.children');
+
+    // すでにロード済みなら何もしない
     if(cache.has(rel)) return cache.get(rel);
+
+    // ロード中があればそれを待つ（多重リクエスト防止）
+    if(inFlight.has(rel)){
+      try{ await inFlight.get(rel); } catch(_) {}
+      return cache.get(rel) || [];
+    }
+
     const btn = li.querySelector('.btn-toggle');
     const spin = li.querySelector('.spinner-border');
+
     if(btn) btn.setAttribute('disabled','disabled');
     if(spin) spin.classList.remove('d-none');
-    try{
-      const url = API.tree + (rel ? ('?rel=' + encodeURIComponent(rel)) : '');
-      const data = await fetchJSON(url); // [ {name,rel,has_children}, ... ]
-      cache.set(rel, data);
-      const ul = li.querySelector(':scope > ul.children');
-      renderNodes(ul, data);
-      wireNodeEvents(ul);
-      // 子へ状態反映（親がチェック済みなら子もチェック）
-      if(isChecked(rel)){
-        ul.querySelectorAll('input.chk').forEach(ch => ch.checked = true);
+
+    // この rel のロードを登録
+    const p = (async () => {
+      try{
+        const url = API.tree + (rel ? ('?rel=' + encodeURIComponent(rel)) : '');
+        const data = await fetchJSON(url); // [ {name,rel,has_children}, ... ]
+        cache.set(rel, data);
+        renderNodes(ul, data);
+        wireNodeEvents(ul);
+        // 子へ状態反映（親がチェック済みなら子もチェック）
+        if(isChecked(rel)){
+          ul.querySelectorAll('input.chk').forEach(ch => ch.checked = true);
+        }
+        updateCounters();
+        return data;
+      } finally {
+        if(btn){
+          btn.removeAttribute('disabled');
+          btn.dataset.state = 'open';
+          btn.textContent = '▾';
+          btn.classList.add('is-open');
+          li.setAttribute('aria-expanded', 'true');
+        }
+        if(spin){ spin.classList.add('d-none'); }
       }
-      updateCounters();
+    })();
+
+    inFlight.set(rel, p);
+    try{
+      const data = await p;
       return data;
     } finally {
-      if(btn){
-        btn.removeAttribute('disabled');
-        btn.dataset.state = 'open';
-        btn.textContent = '▾';
-        btn.classList.add('is-open');
-        li.setAttribute('aria-expanded', 'true');
-      }
-      if(spin){ spin.classList.add('d-none'); }
+      inFlight.delete(rel);
     }
   }
 
   function wireNodeEvents(rootEl){
+    if(!rootEl) return;
     rootEl.addEventListener('click', async (e) => {
       const btn = e.target.closest('.btn-toggle');
       if(btn){
