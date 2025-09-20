@@ -27,3 +27,17 @@ class Config:
     DEFAULT_LLM_MODEL = os.environ.get("DEFAULT_LLM_MODEL", "gpt-5")
     # 許可モデル（ホワイトリスト）
     ALLOWED_LLM_MODELS = os.environ.get("ALLOWED_LLM_MODELS", "gpt-5,gpt-4o").split(',')
+
+    # ============== アップロード関連 ==============
+    # 許可拡張子（カンマ区切りで環境変数から上書き可能）
+    _default_allowed_exts = (
+        "txt,md,markdown,csv,json,yaml,yml,html,htm,"
+        "docx,pptx,xlsx,pdf,"
+        "py,js,ts,java,php,go,rb,cs,sh,sql,css"
+    )
+    ALLOWED_UPLOAD_EXTS = [
+        ext.strip().lower() for ext in os.environ.get("ALLOWED_UPLOAD_EXTS", _default_allowed_exts).split(',') if ext.strip()
+    ]
+
+    # 最大アップロードサイズ（バイト）
+    MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 10 * 1024 * 1024))  # 10MB 既定

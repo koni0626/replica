@@ -7,17 +7,19 @@ from services.ai_log import AiRunLogger
 
 # LangChain
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from services.doc_service import DocService
 from models.knowledge import Knowledge
-from tools import tools
-from tools import php_tools
+from tools import fs_tools
 from tools import git_tool
 from tools import network_tool
 from tools import rag_tools
+from tools import office_word_tool
+from tools import office_excel_tool
+from tools import office_pptx_tool
+from tools import pdf_tool
 
 
 class GptProvider(object):
@@ -42,40 +44,20 @@ class GptProvider(object):
         # ツールのバインド（LLM 側に公開する関数群）
         self.llm_with_tool = self.llm.bind_tools([
             # FS/Text ツール
-            tools.find_files,
-            tools.write_file,
-            tools.read_file,
-            tools.list_files,
-            tools.list_dirs,
-            tools.make_dirs,
-            tools.file_stat,
-            tools.read_file_range,
-            tools.list_python_symbols,
-#            tools.insert_code,
-#            tools.delete_code,
-            tools.search_grep,
-
-            # ここから追加（LLM 編集タグ運用）
-            #tools.mark_llm_edit,
-            #tools.list_llm_edit_regions,
-            #tools.apply_edit_ops,
-
+            fs_tools.find_files,
+            fs_tools.write_file,
+            fs_tools.read_file,
+            fs_tools.list_files,
+            fs_tools.list_dirs,
+            fs_tools.make_dirs,
+            fs_tools.file_stat,
+            fs_tools.read_file_range,
+            fs_tools.search_grep,
             # RAG
             rag_tools.rag_index_text,
             rag_tools.rag_update_index,
             rag_tools.rag_build_index,
             rag_tools.rag_query_text,
-            # PHP 用
-#            php_tools.php_locate_functions,
-#            php_tools.php_insert_after_function_end,
-#            php_tools.php_replace_function_body,
-#            php_tools.php_list_symbols,
-#            php_tools.php_detect_namespace_and_uses,
-#            php_tools.php_add_strict_types_declare,
-#            php_tools.php_insert_use_statement,
-#            php_tools.php_add_method_to_class,
-#            php_tools.php_replace_method_body,
-#            php_tools.php_lint,
             # ネットワーク
             network_tool.fetch_url_text,
             network_tool.fetch_url_links,
@@ -90,45 +72,32 @@ class GptProvider(object):
             git_tool.git_rev_parse,
             git_tool.git_repo_root,
             git_tool.git_diff_own_changes_files,
+            # office
+            office_word_tool.read_docx_text,
+            office_excel_tool.read_xlsx_text,
+            office_pptx_tool.read_pptx_text,
+            #PDF
+            pdf_tool.read_pdf_text
         ])
         # 検索系ツール（base_path を doc_path 配下に固定する対象）
         self._tools_require_base_path = {"find_files", "list_files", "list_dirs", "search_grep"}
         self.tool_map = {
             # FS/Text ツール
-            "list_files": tools.list_files,
-            "list_dirs": tools.list_dirs,
-            "read_file": tools.read_file,
-            "write_file": tools.write_file,
-            "find_files": tools.find_files,
-            "make_dirs": tools.make_dirs,
-            "file_stat": tools.file_stat,
-            "read_file_range": tools.read_file_range,
-            "list_python_symbols": tools.list_python_symbols,
-#            "insert_code": tools.insert_code,
-#            "delete_code": tools.delete_code,
-            "search_grep": tools.search_grep,
-
-            # ここから追加（LLM 編集タグ運用）
-#            "mark_llm_edit": tools.mark_llm_edit,
-#            "list_llm_edit_regions": tools.list_llm_edit_regions,
-#            "apply_edit_ops": tools.apply_edit_ops,
+            "list_files": fs_tools.list_files,
+            "list_dirs": fs_tools.list_dirs,
+            "read_file": fs_tools.read_file,
+            "write_file": fs_tools.write_file,
+            "find_files": fs_tools.find_files,
+            "make_dirs": fs_tools.make_dirs,
+            "file_stat": fs_tools.file_stat,
+            "read_file_range": fs_tools.read_file_range,
+            "search_grep": fs_tools.search_grep,
 
             # RAG
             "rag_build_index": rag_tools.rag_build_index,
             "rag_update_index": rag_tools.rag_update_index,
             "rag_index_text": rag_tools.rag_index_text,
             "rag_query_text": rag_tools.rag_query_text,
-            # PHP 用
-#            "php_locate_functions": php_tools.php_locate_functions,
-#            "php_insert_after_function_end": php_tools.php_insert_after_function_end,
-#            "php_replace_function_body": php_tools.php_replace_function_body,
-#            "php_list_symbols": php_tools.php_list_symbols,
-#            "php_detect_namespace_and_uses": php_tools.php_detect_namespace_and_uses,
-#            "php_add_strict_types_declare": php_tools.php_add_strict_types_declare,
-#            "php_insert_use_statement": php_tools.php_insert_use_statement,
-#            "php_add_method_to_class": php_tools.php_add_method_to_class,
-#            "php_replace_method_body": php_tools.php_replace_method_body,
-#            "php_lint": php_tools.php_lint,
             # ネットワーク
             "fetch_url_text": network_tool.fetch_url_text,
             "fetch_url_links": network_tool.fetch_url_links,
@@ -143,6 +112,12 @@ class GptProvider(object):
             "git_rev_parse": git_tool.git_rev_parse,
             "git_repo_root": git_tool.git_repo_root,
             "git_diff_own_changes_files": git_tool.git_diff_own_changes_files,
+            # office
+            "read_docx_text": office_word_tool.read_docx_text,
+            "read_xlsx_text": office_excel_tool.read_xlsx_text,
+            "read_pptx_text": office_pptx_tool.read_pptx_text,
+            # PDF
+            "read_pdf_text": pdf_tool.read_pdf_text
         }
 
     def _project_base_dir(self, project_id: int) -> Path:
@@ -227,7 +202,9 @@ class GptProvider(object):
             SystemMessage(content=(
                 "# ソースコード修正時のガイド:\n"
                 "- 500行以下のファイルの場合、新しくソースプログラムをwrite_fileで書き換える。\n"
-                "- 500行より大きいファイルの場合、ソースは変更せず、修正が必要な分をメッセージで表示する\n"
+                "- 500行より大きいファイルの場合、ソースは変更せず、修正が必要な分をメッセージで表示する。\n"
+                "- 可能であればどのあたりにソースコードを適用すればよいか、行番号で教えること。\n"
+                "- 修正時は修正に必要な個所のみ修正すること。不必要な修正は行わないこと。\n"
             )),
         ]
 
@@ -415,11 +392,29 @@ class GptProvider(object):
                 print(f"{name} {args}")
                 print(f"[{datetime.now().strftime('%Y/%m/%d %H:%M:%S')}] [DEBUG] Call tool: {name} args={args}")
                 try:
-                    # 検索系ツールなら base_path を doc_path に強制上書き
+                    # 検索系ツールなら base_path を doc_path に強制上書き（ただし doc_path 配下の絶対パス指定は尊重）
                     if name in self._tools_require_base_path:
                         args = dict(args)
                         requested = args.get("base_path") or args.get("path") or args.get("start_dir")
-                        search_base = self._resolve_search_base(base_dir, requested)
+                        search_base: Path
+                        if requested:
+                            try:
+                                req_path = Path(str(requested)).expanduser().resolve()
+                            except Exception:
+                                req_path = None  # type: ignore
+                            if req_path and req_path.is_absolute():
+                                try:
+                                    # doc_path 配下であれば尊重（そのまま使用）
+                                    req_path.relative_to(base_dir)
+                                    search_base = req_path if (req_path.exists() and req_path.is_dir()) else base_dir
+                                except Exception:
+                                    # doc_path 外の絶対パスは拒否して doc_path にフォールバック
+                                    search_base = base_dir
+                            else:
+                                # 相対指定は従来ロジックで解決
+                                search_base = self._resolve_search_base(base_dir, str(requested))
+                        else:
+                            search_base = base_dir
                         args["base_path"] = str(search_base)
                     if name in self.tool_map:
                         _tool = self.tool_map[name]

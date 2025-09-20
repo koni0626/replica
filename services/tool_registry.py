@@ -23,8 +23,6 @@ TOOL_MAP: Dict[str, Any] = {
     "file_stat": fs_tools.file_stat,
     "read_file_range": fs_tools.read_file_range,
     "list_python_symbols": fs_tools.list_python_symbols,
-    "insert_code": fs_tools.insert_code,
-    "delete_code": fs_tools.delete_code,
     "search_grep": fs_tools.search_grep,
     # RAG
     "rag_build_index": rag_tools.rag_build_index,

@@ -22,6 +22,7 @@ if [ -d "$APP_DIR/migrations" ]; then
   fi
 else
   flask db init || true
+  flask db stamp a1b2c3d4e5f6
   flask db migrate -m "init schema" || true
   flask db upgrade || true
 fi

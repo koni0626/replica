@@ -4,6 +4,12 @@ from models.projects import Projects
 from models.knowledge import Knowledge
 
 
+ALLOWED_THEMES = {
+    # ダーク系は廃止し、ライト3種のみ許可
+    "theme-sky", "theme-emerald", "theme-amber",
+}
+
+
 class ProjectService(object):
     def __init__(self):
         pass
@@ -38,16 +44,20 @@ class ProjectService(object):
         if not original_project:
             raise ValueError("プロジェクトが見つかりません")
 
-        # プロジェクトの複製
+        # プロジェクトの複製（テーマはそのまま引き継ぐが、許可外なら 'theme-sky' へフォールバック）
+        inherited_theme = getattr(original_project, 'theme', 'theme-sky')
+        if inherited_theme not in ALLOWED_THEMES:
+            inherited_theme = 'theme-sky'
+
         new_project = Projects(
             project_name=new_name,
             description=original_project.description,
-            doc_path=None
+            doc_path=None,
+            theme=inherited_theme
         )
         db.session.add(new_project)
         db.session.commit()
 
-        # Knowledgeの複製
         # Knowledgeの複製
         original_knowledges = Knowledge.query.filter_by(project_id=project_id).all()
         for knowledge in original_knowledges:
@@ -75,3 +85,17 @@ class ProjectService(object):
 
         db.session.delete(project)
         db.session.commit()
+
+    # 追加: テーマ更新
+    def update_theme(self, project_id: int, theme_key: str) -> Projects:
+        # ダーク系は廃止: 受け取った場合は 'theme-sky' へフォールバック
+        if theme_key == 'theme-dark' or (isinstance(theme_key, str) and theme_key.endswith('-dark')):
+            theme_key = 'theme-sky'
+        if theme_key not in ALLOWED_THEMES:
+            raise ValueError("invalid_theme")
+        proj = Projects.query.get(project_id)
+        if not proj:
+            raise ValueError("project_not_found")
+        proj.theme = theme_key
+        db.session.commit()
+        return proj

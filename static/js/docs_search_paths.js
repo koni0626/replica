@@ -1,274 +1,352 @@
+// 検索パス ツリー（Lazy Load + UI 改善 + フィルタ）
 (function(){
-  function run(){
-    const BOOT = window.SEARCH_PATHS_BOOT || {};
-    if(!BOOT.endpoints){
-      console.error('[search-paths] BOOT.endpoints が未定義です。テンプレート内で window.SEARCH_PATHS_BOOT を先に定義してください。');
+  // ルート要素の data-* からブート情報を取得（インラインJS撤廃）
+  const bootRoot = document.getElementById('search-paths-root');
+  const projectId = bootRoot?.dataset.projectId;
+  const API = {
+    tree: bootRoot?.dataset.endpointTree,
+    stateGet: bootRoot?.dataset.endpointStateGet,
+    statePost: bootRoot?.dataset.endpointStatePost,
+  };
+
+  const $root = document.getElementById('tree-root');
+  const $loading = document.getElementById('tree-loading');
+  const $selCount = document.getElementById('sel-count');
+  const $excCount = document.getElementById('exc-count');
+  const $filter = document.getElementById('filter-input');
+  const $filterHint = document.getElementById('filter-hint');
+  const $saveToast = document.getElementById('save-toast');
+
+  // CSRF トークン（Flask-WTF）
+  const CSRF = document.querySelector('meta[name="csrf-token"]').getAttribute('content') || '';
+
+  // 状態
+  let savedState = { includes: [], excludes: [] };
+  const cache = new Map(); // rel -> nodes[]
+
+  function setLoading(v){
+    if(!$loading) return;
+    $loading.style.display = v ? '' : 'none';
+  }
+
+  function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
+
+  function relToId(rel){ return rel.replace(/[^a-zA-Z0-9_\-]/g, '_'); }
+
+  function normRel(rel){ return (rel||'').replace(/\\/g,'/').replace(/^\/+|\/+$/g,''); }
+
+  function isChecked(rel){
+    rel = normRel(rel);
+    if(!rel) return false;
+    // excludes に含まれていれば false 優先
+    if(savedState.excludes.some(x => x === rel || x.startsWith(rel + '/'))) return false;
+    // includes に含まれていれば true
+    if(savedState.includes.some(x => x === rel || x.startsWith(rel + '/'))) return true;
+    return false;
+  }
+
+  function updateCounters(){
+    if($selCount) $selCount.textContent = String(savedState.includes.length);
+    if($excCount) $excCount.textContent = String(savedState.excludes.length);
+  }
+
+  async function fetchJSON(url){
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  }
+
+  function nodeTemplate(node){
+    const rel = node.rel;
+    const id = 'node_' + relToId(rel);
+    const checked = isChecked(rel) ? 'checked' : '';
+    const hasChildren = !!node.has_children;
+    const caret = hasChildren
+      ? '<button class="btn btn-sm btn-outline-secondary me-1 btn-toggle" data-state="closed" aria-label="toggle" aria-expanded="false">▸</button>'
+      : '<span class="me-1 text-muted" aria-hidden="true">•</span>';
+    return `
+      <li data-rel="${esc(rel)}" id="${id}" role="treeitem" aria-expanded="${hasChildren ? 'false' : 'true'}">
+        <div class="tree-row d-flex align-items-center">
+          ${caret}
+          <span class="icon-folder" aria-hidden="true"></span>
+          <input class="form-check-input me-2 chk" type="checkbox" ${checked} />
+          <span class="label" title="${esc(rel)}">${esc(node.name)}</span>
+          <span class="spinner-border spinner-border-sm text-primary ms-2 d-none" role="status" aria-hidden="true"></span>
+          <span class="badge-count ms-2 d-none"></span>
+        </div>
+        <ul class="children list-unstyled ms-4" role="group"></ul>
+      </li>
+    `;
+  }
+
+  function renderNodes($ul, nodes){
+    const html = nodes.map(nodeTemplate).join('');
+    $ul.insertAdjacentHTML('beforeend', html);
+  }
+
+  async function loadChildren(li){
+    const rel = li.dataset.rel || '';
+    if(cache.has(rel)) return cache.get(rel);
+    const btn = li.querySelector('.btn-toggle');
+    const spin = li.querySelector('.spinner-border');
+    if(btn) btn.setAttribute('disabled','disabled');
+    if(spin) spin.classList.remove('d-none');
+    try{
+      const url = API.tree + (rel ? ('?rel=' + encodeURIComponent(rel)) : '');
+      const data = await fetchJSON(url); // [ {name,rel,has_children}, ... ]
+      cache.set(rel, data);
+      const ul = li.querySelector(':scope > ul.children');
+      renderNodes(ul, data);
+      wireNodeEvents(ul);
+      // 子へ状態反映（親がチェック済みなら子もチェック）
+      if(isChecked(rel)){
+        ul.querySelectorAll('input.chk').forEach(ch => ch.checked = true);
+      }
+      updateCounters();
+      return data;
+    } finally {
+      if(btn){
+        btn.removeAttribute('disabled');
+        btn.dataset.state = 'open';
+        btn.textContent = '▾';
+        btn.classList.add('is-open');
+        li.setAttribute('aria-expanded', 'true');
+      }
+      if(spin){ spin.classList.add('d-none'); }
+    }
+  }
+
+  function wireNodeEvents(rootEl){
+    rootEl.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.btn-toggle');
+      if(btn){
+        const li = e.target.closest('li');
+        const state = btn.dataset.state || 'closed';
+        const ul = li.querySelector(':scope > ul.children');
+        if(state === 'closed'){
+          if(li && ul.children.length === 0){
+            await loadChildren(li);
+          }
+          btn.dataset.state = 'open';
+          btn.textContent = '▾';
+          btn.classList.add('is-open');
+          ul.classList.remove('d-none');
+          li.setAttribute('aria-expanded', 'true');
+        } else {
+          btn.dataset.state = 'closed';
+          btn.textContent = '▸';
+          btn.classList.remove('is-open');
+          // 折りたたみ時は子ULを非表示（DOMは残す）
+          if(ul) ul.classList.add('d-none');
+          li.setAttribute('aria-expanded', 'false');
+        }
+      }
+    });
+
+    rootEl.addEventListener('change', (e) => {
+      const chk = e.target.closest('input.chk');
+      if(!chk) return;
+      const li = e.target.closest('li');
+      const rel = li.dataset.rel || '';
+      const on = chk.checked;
+      // 状態集合を更新（重複を避ける）
+      if(on){
+        savedState.excludes = savedState.excludes.filter(x => !(x === rel || x.startsWith(rel + '/')));
+        if(!savedState.includes.includes(rel)) savedState.includes.push(rel);
+      } else {
+        savedState.includes = savedState.includes.filter(x => !(x === rel || x.startsWith(rel + '/')));
+        if(!savedState.excludes.includes(rel)) savedState.excludes.push(rel);
+      }
+      // 子に伝搬（ロード済みの子のみ）
+      const ul = li.querySelector(':scope > ul.children');
+      if(ul){ ul.querySelectorAll('input.chk').forEach(ch => ch.checked = on); }
+      updateCounters();
+      // 行の見た目（state-クラス）を更新
+      updateRowState(li);
+    });
+  }
+
+  function updateRowState(li){
+    // 親子のチェック状態から state-include/exclude/mixed を付与（ロード済みの範囲）
+    const rel = li?.dataset?.rel || '';
+    const row = li?.querySelector(':scope > .tree-row');
+    if(!row) return;
+    li.classList.remove('state-include','state-exclude','state-mixed');
+    const on = isChecked(rel);
+    if(on){
+      li.classList.add('state-include');
+    } else {
+      // 子にチェックが残っている場合は mixed とする（簡易）
+      const anyChildOn = !!li.querySelector(':scope ul.children input.chk:checked');
+      li.classList.add(anyChildOn ? 'state-mixed' : 'state-exclude');
+    }
+  }
+
+  function updateAllRowStates(){
+    document.querySelectorAll('#tree-root li[data-rel]').forEach(li => updateRowState(li));
+  }
+
+  function filterTree(q){
+    q = (q || '').trim().toLowerCase();
+    if(!$root) return;
+    if($filterHint) $filterHint.style.display = q ? '' : 'none';
+    // すべてのLI
+    const items = Array.from($root.querySelectorAll('li[data-rel]'));
+    if(!q){
+      items.forEach(li => li.classList.remove('d-none'));
       return;
     }
-    const treeRoot = document.getElementById('tree-root');
-    const selCountEl = document.getElementById('sel-count');
-    const excCountEl = document.getElementById('exc-count');
-    const spinner = document.getElementById('tree-loading');
+    // 後置きで決めるため一旦すべて非表示
+    items.forEach(li => li.classList.add('d-none'));
 
-    const showSpinner = () => spinner && spinner.classList.remove('d-none');
-    const hideSpinner = () => spinner && spinner.classList.add('d-none');
-
-    function getCsrfTokenFromMeta(){
-      const m = document.querySelector('meta[name="csrf-token"]');
-      return m ? m.getAttribute('content') : '';
-    }
-
-    function fetchJSON(url, opts){
-      const token = getCsrfTokenFromMeta();
-      const init = Object.assign({
-        headers: {'Content-Type':'application/json', 'X-CSRFToken': token},
-        credentials: 'same-origin'
-      }, opts||{});
-      return fetch(url, init).then(async (r)=>{
-        if(!r.ok){
-          throw new Error(`HTTP ${r.status}`);
+    // 一致判定と祖先展開
+    const matchMap = new Map();
+    function matches(li){
+      if(matchMap.has(li)) return matchMap.get(li);
+      const label = li.querySelector(':scope > .tree-row .label');
+      const selfMatch = label && (label.textContent || '').toLowerCase().includes(q);
+      let childMatch = false;
+      const children = li.querySelectorAll(':scope > ul.children > li');
+      children.forEach(c => { if(matches(c)) childMatch = true; });
+      const any = selfMatch || childMatch;
+      matchMap.set(li, any);
+      if(any){
+        // 表示
+        li.classList.remove('d-none');
+        // 祖先を展開
+        let p = li.parentElement;
+        while(p && p !== $root){
+          if(p.matches('ul.children')){
+            const pli = p.parentElement;
+            pli.classList.remove('d-none');
+            const btn = pli.querySelector(':scope > .tree-row .btn-toggle');
+            const ul = pli.querySelector(':scope > ul.children');
+            if(btn && ul){
+              btn.dataset.state = 'open';
+              btn.textContent = '▾';
+              btn.classList.add('is-open');
+              ul.classList.remove('d-none');
+              pli.setAttribute('aria-expanded', 'true');
+            }
+          }
+          p = p.parentElement;
         }
-        const ct = (r.headers.get('content-type')||'').toLowerCase();
-        if(ct.includes('application/json')){
-          return r.json();
-        }
-        const text = await r.text();
-        throw new Error(`Unexpected content-type: ${ct}; body: ${text.slice(0,200)}`);
-      });
+      }
+      return any;
     }
+    // ルート直下のみ起点にして再帰
+    const roots = $root.querySelectorAll(':scope > ul > li');
+    roots.forEach(li => matches(li));
+  }
 
-    function renderTree(nodes){
+  function showSavedToast(){
+    if(!$saveToast) return;
+    try{
+      if(window.bootstrap && window.bootstrap.Toast){
+        const inst = window.bootstrap.Toast.getOrCreateInstance($saveToast, { delay: 2000 });
+        inst.show();
+      } else {
+        // Fallback: CSSクラスで簡易表示
+        $saveToast.classList.add('show');
+        setTimeout(() => { $saveToast.classList.remove('show'); }, 2000);
+      }
+    } catch(e){
+      // 最終手段
+      console.log('保存しました');
+    }
+  }
+
+  async function init(){
+    setLoading(true);
+    try{
+      // 状態を取得
+      savedState = await fetchJSON(API.stateGet);
+      updateCounters();
+      // ルート直下のみ取得
+      const data = await fetchJSON(API.tree);
+      cache.set('', data);
       const ul = document.createElement('ul');
       ul.className = 'list-unstyled';
-      for(const n of nodes){
-        const li = document.createElement('li');
-        const row = document.createElement('div');
-        row.className = 'd-flex align-items-center gap-2 py-1';
-
-        const toggler = document.createElement('button');
-        toggler.type = 'button';
-        toggler.className = 'btn btn-sm btn-link text-decoration-none px-1';
-        toggler.textContent = n.children && n.children.length ? '▸' : '·';
-        toggler.dataset.state = 'closed';
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.dataset.rel = n.rel;
-        cb.className = 'form-check-input';
-
-        const label = document.createElement('span');
-        label.textContent = n.name;
-
-        row.appendChild(toggler);
-        row.appendChild(cb);
-        row.appendChild(label);
-        li.appendChild(row);
-
-        if(n.children && n.children.length){
-          const childWrap = document.createElement('div');
-          childWrap.style.display = 'none';
-          childWrap.style.marginLeft = '16px';
-          childWrap.appendChild(renderTree(n.children));
-          li.appendChild(childWrap);
-          toggler.addEventListener('click', ()=>{
-            const open = toggler.dataset.state === 'open';
-            toggler.dataset.state = open? 'closed':'open';
-            toggler.textContent = open? '▸':'▾';
-            childWrap.style.display = open? 'none':'block';
-          });
-        } else {
-          // 子が無い場合はトグル無効化（見た目は中点）
-          toggler.disabled = true;
-          toggler.classList.add('disabled');
-        }
-
-        ul.appendChild(li);
-      }
-      return ul;
+      $root.appendChild(ul);
+      renderNodes(ul, data);
+      wireNodeEvents(ul);
+      updateAllRowStates();
+    } catch(err){
+      console.error(err);
+      $root.innerHTML = '<div class="text-danger">ツリーの読み込みに失敗しました。</div>';
+    } finally {
+      setLoading(false);
     }
-
-    function collectState(){
-      const includes = new Set();
-      const excludes = new Set();
-
-      function dfs(nodeEl){
-        const row = nodeEl.querySelector(':scope > div');
-        const cb = row && row.querySelector('input[type="checkbox"]');
-        const rel = cb ? cb.dataset.rel : '';
-        const childUl = nodeEl.querySelector(':scope > div + div ul');
-
-        if(cb){
-          const checked = cb.checked;
-          const indeterminate = cb.indeterminate;
-          if(checked && !indeterminate){
-            includes.add(rel);
-            return; // 子孫は省略（圧縮）
-          }
-          if(!checked && !indeterminate){
-            // 完全OFFのとき、親のONからのオーバーライドという意味で除外登録
-            excludes.add(rel);
-            return;
-          }
-        }
-        if(childUl){
-          for(const li of childUl.children){
-            dfs(li);
-          }
-        }
-      }
-
-      const tree = treeRoot.querySelector('ul');
-      if(tree){
-        for(const li of tree.children){ dfs(li); }
-      }
-      return {includes:Array.from(includes), excludes:Array.from(excludes)};
-    }
-
-    function applyStateToTree(state){
-      const includeSet = new Set(state.includes||[]);
-      const excludeSet = new Set(state.excludes||[]);
-
-      function dfs(nodeEl){
-        const row = nodeEl.querySelector(':scope > div');
-        const cb = row && row.querySelector('input[type="checkbox"]');
-        const rel = cb ? cb.dataset.rel : '';
-        const childWrap = nodeEl.querySelector(':scope > div + div');
-        const childUl = childWrap && childWrap.querySelector('ul');
-
-        let checked = false, ind = false;
-        if(includeSet.has(rel)){
-          checked = true; ind = false;
-        }else if(excludeSet.has(rel)){
-          checked = false; ind = false;
-        }else if(childUl){
-          let anyOn=false, anyOff=false;
-          for(const li of childUl.children){
-            const r = dfs(li);
-            anyOn = anyOn || r.checked || r.indeterminate;
-            anyOff = anyOff || (!r.checked && !r.indeterminate);
-          }
-          if(anyOn && anyOff){ ind = true; }
-          else if(anyOn){ checked = true; }
-        }
-        if(cb){
-          cb.checked = checked;
-          cb.indeterminate = ind;
-        }
-        return {checked, indeterminate: ind};
-      }
-
-      const tree = treeRoot.querySelector('ul');
-      if(tree){ for(const li of tree.children){ dfs(li); } }
-      updateCounters();
-    }
-
-    function setAll(checked){
-      treeRoot.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
-        cb.checked = !!checked; cb.indeterminate = false;
-      });
-      updateCounters();
-    }
-
-    function updateCounters(){
-      const {includes, excludes} = collectState();
-      if(selCountEl) selCountEl.textContent = includes.length;
-      if(excCountEl) excCountEl.textContent = excludes.length;
-    }
-
-    function wireCheckboxCascade(){
-      treeRoot.addEventListener('change', (e)=>{
-        const cb = e.target;
-        if(!(cb instanceof HTMLInputElement) || cb.type!== 'checkbox') return;
-        // 親→子へ伝播
-        const li = cb.closest('li');
-        const subtree = li && li.querySelector(':scope > div + div');
-        if(subtree){
-          subtree.querySelectorAll('input[type="checkbox"]').forEach(k=>{
-            k.checked = cb.checked; k.indeterminate = false;
-          });
-        }
-        // 子→親の indeterminate 更新
-        let p = li && li.parentElement && li.parentElement.closest('li');
-        while(p){
-          const parentCb = p.querySelector(':scope > div input[type="checkbox"]');
-          const childUl = p.querySelector(':scope > div + div ul');
-          if(parentCb && childUl){
-            let anyOn=false, anyOff=false;
-            childUl.querySelectorAll(':scope > li > div input[type="checkbox"]').forEach(x=>{
-              if(x.checked || x.indeterminate) anyOn=true; else anyOff=true;
-            });
-            parentCb.indeterminate = anyOn && anyOff;
-            parentCb.checked = !parentCb.indeterminate && anyOn;
-          }
-          p = p.parentElement && p.parentElement.closest('li');
-        }
-        updateCounters();
-      });
-    }
-
-    function applyProfile(profile){
-      // 簡易。includes をプロファイルのトップディレクトリに設定
-      let inc=[];
-      if(profile==='flask'){
-        inc=["controllers","forms","services","models","Models","templates","tools"];
-      }else if(profile==='cakephp4'){
-        inc=["src/Controller","src/Model","src/View","templates","config","webroot","plugins"];
-      }
-      const state = {includes:inc, excludes:[]};
-      applyStateToTree(state);
-    }
-
-    // ここから初期化（スピナー制御を統合）
-    showSpinner();
-    Promise.all([
-      fetchJSON(BOOT.endpoints.tree),
-      fetchJSON(BOOT.endpoints.stateGet)
-    ]).then(([tree, state])=>{
-      treeRoot.innerHTML = '';
-      treeRoot.appendChild(renderTree(tree));
-      wireCheckboxCascade();
-      applyStateToTree(state);
-    }).catch(err=>{
-      console.error('[search-paths] 初期化でエラー:', err);
-      treeRoot.innerHTML = '<div class="text-danger small">ツリーの読み込みに失敗しました。再読み込みしてください。</div>';
-    }).finally(()=>{
-      hideSpinner();
-      // フェールセーフ（もしスピナーが残ってしまった場合の保険）
-      setTimeout(hideSpinner, 0);
-    });
-
-    // 操作ボタン
-    document.getElementById('btn-expand')?.addEventListener('click', ()=>{
-      treeRoot.querySelectorAll('button[data-state]').forEach(btn=>{
-        const childWrap = btn.parentElement.nextElementSibling;
-        if(childWrap){ btn.dataset.state='open'; btn.textContent='▾'; childWrap.style.display='block'; }
-      });
-    });
-    document.getElementById('btn-collapse')?.addEventListener('click', ()=>{
-      treeRoot.querySelectorAll('button[data-state]').forEach(btn=>{
-        const childWrap = btn.parentElement.nextElementSibling;
-        if(childWrap){ btn.dataset.state='closed'; btn.textContent='▸'; childWrap.style.display='none'; }
-      });
-    });
-    document.getElementById('btn-select-all')?.addEventListener('click', ()=> setAll(true));
-    document.getElementById('btn-unselect-all')?.addEventListener('click', ()=> setAll(false));
-    document.getElementById('btn-apply-flask')?.addEventListener('click', ()=> applyProfile('flask'));
-    document.getElementById('btn-apply-cake')?.addEventListener('click', ()=> applyProfile('cakephp4'));
-    document.getElementById('btn-save')?.addEventListener('click', ()=>{
-      const state = collectState();
-      showSpinner();
-      fetchJSON(BOOT.endpoints.statePost, {method:'POST', body: JSON.stringify(state)}).then(r=>{
-        if(r && r.ok!==false){ alert('保存しました'); }
-        else{ alert('保存に失敗しました'); }
-      }).catch(()=> alert('保存エラー'))
-        .finally(()=> hideSpinner());
-    });
   }
 
-  // DOM 準備完了で初期化（読み込み済みなら即実行）
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', run);
-  }else{
-    run();
-  }
+  // 操作用ボタン
+  document.getElementById('btn-save')?.addEventListener('click', async () => {
+    try{
+      const res = await fetch(API.statePost, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': CSRF,
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ includes: savedState.includes, excludes: savedState.excludes })
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      savedState = data; // 返却された正規化後を反映
+      updateCounters();
+      updateAllRowStates();
+      showSavedToast();
+    } catch(err){
+      console.error(err);
+      alert('保存に失敗しました');
+    }
+  });
+
+  document.getElementById('btn-select-all')?.addEventListener('click', () => {
+    // ルート直下を一括ON（未ロード分はサーバ側の正規化に委ねる）
+    const roots = cache.get('') || [];
+    roots.forEach(n => {
+      if(!savedState.includes.includes(n.rel)) savedState.includes.push(n.rel);
+      savedState.excludes = savedState.excludes.filter(x => !(x === n.rel || x.startsWith(n.rel + '/')));
+      const li = document.querySelector(`li[data-rel="${CSS.escape(n.rel)}"]`);
+      const chk = li?.querySelector('input.chk');
+      if(chk){ chk.checked = true; }
+    });
+    updateCounters();
+    updateAllRowStates();
+  });
+
+  document.getElementById('btn-unselect-all')?.addEventListener('click', () => {
+    const roots = cache.get('') || [];
+    roots.forEach(n => {
+      if(!savedState.excludes.includes(n.rel)) savedState.excludes.push(n.rel);
+      savedState.includes = savedState.includes.filter(x => !(x === n.rel || x.startsWith(n.rel + '/')));
+      const li = document.querySelector(`li[data-rel="${CSS.escape(n.rel)}"]`);
+      const chk = li?.querySelector('input.chk');
+      if(chk){ chk.checked = false; }
+    });
+    updateCounters();
+    updateAllRowStates();
+  });
+
+  document.getElementById('btn-expand')?.addEventListener('click', async () => {
+    // ロード済みだけ開く（DOMにある子ULをすべて表示）
+    document.querySelectorAll('.btn-toggle').forEach(b => { b.dataset.state='open'; b.textContent='▾'; b.classList.add('is-open'); });
+    document.querySelectorAll('ul.children').forEach(ul => ul.classList.remove('d-none'));
+    document.querySelectorAll('#tree-root li[role="treeitem"]').forEach(li => li.setAttribute('aria-expanded','true'));
+  });
+  document.getElementById('btn-collapse')?.addEventListener('click', () => {
+    document.querySelectorAll('.btn-toggle').forEach(b => { b.dataset.state='closed'; b.textContent='▸'; b.classList.remove('is-open'); });
+    document.querySelectorAll('ul.children').forEach(ul => ul.classList.add('d-none'));
+    document.querySelectorAll('#tree-root li[role="treeitem"]').forEach(li => li.setAttribute('aria-expanded','false'));
+  });
+
+  // フィルタ
+  $filter?.addEventListener('input', (e) => {
+    filterTree(e.target.value);
+  });
+
+  // 起動
+  window.addEventListener('DOMContentLoaded', init);
 })();

@@ -8,7 +8,7 @@ from services.knowledge_service import KnowledgeService
 
 knowledge_bp = Blueprint('knowledge', __name__)
 
-from services.project_service import ProjectService
+from services.project_service import ProjectService, ALLOWED_THEMES
 
 @knowledge_bp.route('/api/create_from_prompt', methods=['POST'])
 @login_required
@@ -34,8 +34,11 @@ def index(project_id):
     knowledge = KnowledgeService.get_all_by_project(project_id)
     pj = ProjectService().fetch_by_id(project_id)
     project_name = pj.project_name if pj else f"Project #{project_id}"
+    theme_class = getattr(pj, 'theme', 'theme-sky') if pj else 'theme-sky'
+    if theme_class not in ALLOWED_THEMES:
+        theme_class = 'theme-sky'
     # 事前のJSONダンプは行わず、そのままテンプレートに渡す（テンプレート側で |tojson を使う）
-    return render_template('knowledge/index.html', knowledge=knowledge, project_id=project_id, project_name=project_name)
+    return render_template('knowledge/index.html', knowledge=knowledge, project_id=project_id, project_name=project_name, theme_class=theme_class)
 
 
 @knowledge_bp.route('/create/<int:project_id>', methods=['GET', 'POST'])
@@ -44,11 +47,14 @@ def create(project_id):
     form = KnowledgeForm()
     pj = ProjectService().fetch_by_id(project_id)
     project_name = pj.project_name if pj else f"Project #{project_id}"
+    theme_class = getattr(pj, 'theme', 'theme-sky') if pj else 'theme-sky'
+    if theme_class not in ALLOWED_THEMES:
+        theme_class = 'theme-sky'
     if form.validate_on_submit():
         KnowledgeService.create(form, project_id, current_user.user_id)
         flash('ナレッジを追加しました', 'success')
         return redirect(url_for('knowledge.index', project_id=project_id))
-    return render_template('knowledge/create.html', form=form, project_id=project_id, project_name=project_name)
+    return render_template('knowledge/create.html', form=form, project_id=project_id, project_name=project_name, theme_class=theme_class)
 
 
 @knowledge_bp.route('/edit/<int:project_id>/<int:knowledge_id>', methods=['GET', 'POST'])
@@ -58,11 +64,14 @@ def edit(project_id, knowledge_id):
     form = KnowledgeForm(obj=knowledge)
     pj = ProjectService().fetch_by_id(project_id)
     project_name = pj.project_name if pj else f"Project #{project_id}"
+    theme_class = getattr(pj, 'theme', 'theme-sky') if pj else 'theme-sky'
+    if theme_class not in ALLOWED_THEMES:
+        theme_class = 'theme-sky'
     if form.validate_on_submit():
         KnowledgeService.update(knowledge, form)
         flash('ナレッジを更新しました', 'success')
         return redirect(url_for('knowledge.index', project_id=project_id))
-    return render_template('knowledge/edit.html', form=form, project_id=project_id, knowledge_id=knowledge_id, project_name=project_name)
+    return render_template('knowledge/edit.html', form=form, project_id=project_id, knowledge_id=knowledge_id, project_name=project_name, theme_class=theme_class)
 
 
 @knowledge_bp.route('/delete/<int:project_id>/<int:knowledge_id>', methods=['POST'])

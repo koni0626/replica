@@ -37,7 +37,7 @@
     <div class="card h-100">
       <div class="card-header fw-bold">プレビュー</div>
       <div class="card-body">
-        <div class="border rounded p-3 bg-light" id="content-preview" style="min-height: 20rem;">
+        <div class="border rounded p-3 bg-light" id="content-preview">
           <div class="text-muted">（Markdownプレビューがここに表示されます）</div>
         </div>
       </div>
@@ -48,31 +48,4 @@
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
-<script>
-  marked.setOptions({ gfm: true, breaks: true });
-  function renderMarkdownTo(targetEl, srcText) {
-    const md = (srcText || "");
-    // 危険なタグ（script/style/iframe）の開始記号をエスケープして生HTML解釈を防ぐ
-    const safeMd = md.replace(/<(?=\/?(script|style|iframe)\b)/gi, '&lt;');
-    const dirty = marked.parse(safeMd);
-    // 厳格サニタイズ: インタラクティブ/フォーム系要素を禁止し、属性も制限
-    const sanitizeOptions = {
-      FORBID_TAGS: ['button','form','input','select','textarea','style','script','iframe','object','embed','link','meta'],
-      ALLOWED_TAGS: [
-        'a','p','br','blockquote','ul','ol','li','pre','code','span','strong','em','del','hr',
-        'h1','h2','h3','h4','h5','h6','table','thead','tbody','tr','th','td','img'
-      ],
-      ALLOWED_ATTR: ['href','title','alt','src','class','id','lang','dir','width','height','align','colspan','rowspan','scope','target','rel'],
-      ALLOWED_URI_REGEXP: /^(?:(?:https?|data|mailto):|[^a-z]|[a-z+\.\-]+(?:[^a-z+\.\-:]|$))/i,
-    };
-    const html = DOMPurify.sanitize(dirty, sanitizeOptions);
-    targetEl.innerHTML = html;
-  }
-  const contentInput = document.getElementById("content-input");
-  const contentPreview = document.getElementById("content-preview");
-  if (contentInput && contentPreview) {
-    const updatePreview = () => renderMarkdownTo(contentPreview, contentInput.value);
-    contentInput.addEventListener("input", updatePreview);
-    updatePreview();
-  }
-</script>
+<script src="{{ url_for('static', filename='js/knowledge_form.js') }}"></script>

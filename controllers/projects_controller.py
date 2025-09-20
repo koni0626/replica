@@ -1,8 +1,9 @@
 # project_controller.py
-from flask import Blueprint, render_template, redirect, url_for, flash, request
-from services.project_service import ProjectService
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from services.project_service import ProjectService, ALLOWED_THEMES
 from forms.project_form import ProjectRegisterForm
 from flask_login import login_required
+from extensions import csrf
 
 project_bp = Blueprint("projects", __name__)
 
@@ -89,3 +90,17 @@ def delete_project(project_id):
         flash(str(e), 'error')
 
     return redirect(url_for('projects.index'))
+
+# 追加: テーマ更新API（ライト3種のみ許可）
+@project_bp.route('/<int:project_id>/theme', methods=['POST'])
+@login_required
+def update_theme(project_id: int):
+    data = request.get_json(silent=True) or {}
+    theme = (data.get('theme') or '').strip()
+    if theme not in ALLOWED_THEMES:
+        return jsonify({"ok": False, "error": "invalid_theme"}), 400
+    try:
+        proj = ProjectService().update_theme(project_id, theme)
+        return jsonify({"ok": True, "project_id": project_id, "theme": proj.theme})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400

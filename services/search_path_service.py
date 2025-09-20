@@ -32,24 +32,65 @@ class SearchPathService:
 
     def load_state(self, project_id: int) -> Dict[str, Any]:
         p = self._state_path(project_id)
+        REQUIRED_EXCLUDES = {".git", "vendor"}
+
+        def _norm(s: str) -> str:
+            return str(s).strip().replace("\\", "/").strip("/")
+
         if not p.exists():
-            return {"version": self.VERSION, "includes": [], "excludes": []}
+            return {"version": self.VERSION, "includes": [], "excludes": sorted(list(REQUIRED_EXCLUDES))}
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             inc = data.get("includes") or []
             exc = data.get("excludes") or []
             if not isinstance(inc, list) or not isinstance(exc, list):
-                return {"version": self.VERSION, "includes": [], "excludes": []}
-            return {"version": int(data.get("version") or self.VERSION), "includes": inc, "excludes": exc}
+                return {"version": self.VERSION, "includes": [], "excludes": sorted(list(REQUIRED_EXCLUDES))}
+            # 正規化
+            inc_norm = [_norm(x) for x in inc if _norm(x)]
+            exc_norm = [_norm(x) for x in exc if _norm(x)]
+            # includes から .git / vendor を除外
+            inc_norm = [x for x in inc_norm if
+                        x not in REQUIRED_EXCLUDES and not any(x.startswith(f"{rx}/") for rx in REQUIRED_EXCLUDES)]
+            # excludes へ強制追加
+            exc_norm.extend(REQUIRED_EXCLUDES)
+            return {
+                "version": int(data.get("version") or self.VERSION),
+                "includes": sorted(list(dict.fromkeys(inc_norm))),
+                "excludes": sorted(list(dict.fromkeys(exc_norm))),
+            }
         except Exception:
-            # 壊れている場合は初期状態を返す
-            return {"version": self.VERSION, "includes": [], "excludes": []}
+            # 壊れている場合は初期状態（必須除外のみ）
+            return {"version": self.VERSION, "includes": [], "excludes": sorted(list(REQUIRED_EXCLUDES))}
 
     def save_state(self, project_id: int, includes: List[str], excludes: List[str]) -> Dict[str, Any]:
+        """
+        ツリー設定を保存する。
+        - includes/excludes を正規化（パス区切りを / に統一、前後の / を除去）
+        - .git / vendor / .idea は常に excludes に含める（強制）
+        - includes に .git / vendor / .idea が紛れていた場合は除去する
+        """
+        REQUIRED_EXCLUDES = {".git", "vendor", ".idea"}
+
+        def _norm(s: str) -> str:
+            return str(s).strip().replace("\\", "/").strip("/")
+
+        # 正規化
+        inc_raw = [x for x in (includes or []) if str(x).strip()]
+        exc_raw = [x for x in (excludes or []) if str(x).strip()]
+        inc_norm = [_norm(x) for x in inc_raw if _norm(x)]
+        exc_norm = [_norm(x) for x in exc_raw if _norm(x)]
+        # includes から .git / vendor / .idea を除外（トップレベル表記のみ強制排除）
+        inc_norm = [x for x in inc_norm if
+                    x not in REQUIRED_EXCLUDES and not any(x.startswith(f"{rx}/") for rx in REQUIRED_EXCLUDES)]
+        # excludes に .git / vendor / .idea を必ず追加
+        exc_norm.extend(REQUIRED_EXCLUDES)
+        # 重複排除（順序を保ったユニーク化→最終的に既存仕様どおり sorted）
+        inc_final = sorted(list(dict.fromkeys(inc_norm)))
+        exc_final = sorted(list(dict.fromkeys(exc_norm)))
         state = {
             "version": self.VERSION,
-            "includes": sorted(list(dict.fromkeys(includes or []))),
-            "excludes": sorted(list(dict.fromkeys(excludes or []))),
+            "includes": inc_final,
+            "excludes": exc_final,
         }
         p = self._state_path(project_id)
         p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -67,81 +108,84 @@ class SearchPathService:
 
     def build_tree(self, project_id: int, rel: str = "") -> List[Dict[str, Any]]:
         """
-        doc_path 配下のディレクトリツリーを返す（配列）。
-        - vendor/.github/logs/tmp は除外（深さ無制限でサブツリーごと除外）
-        - search_paths.json の excludes も除外（先頭一致でサブツリーごと除外）
-        - rel（相対パス）でサブツリー取得にも対応
-        返却ノード: { name, rel, children: [...] }
+        doc_path 配下の "直下1階層のみ" のディレクトリ一覧を返す（Lazy Load 用）。
+        - 巨大/不要ディレクトリは除外（.git / vendor / .github / logs / node_modules / .venv / __pycache__ / .idea）
+        - rel を指定すると、そのサブディレクトリ直下のみを返す
+        返却ノード: { name, rel, has_children }
         """
         base = self._doc_base(project_id)
-        start = base
-        rel_norm = (rel or "").strip().replace("\\", "/")
-        if rel_norm:
-            start = (base / rel_norm).resolve()
+
+        EXCLUDED_NAMES = {".git", "vendor", ".github", "logs", ".venv", "__pycache__", ".idea"}
+
+        def is_excluded_path(p: Path) -> bool:
             try:
-                start.relative_to(base)
+                parts = p.resolve().relative_to(base).parts
             except Exception:
-                start = base
+                # base 外は対象外
+                return True
+            return any(part in EXCLUDED_NAMES for part in parts)
+
+        # 開始ディレクトリを決定
+        start = base
+        rel_norm = (rel or "").strip().replace("\\", "/").strip("/")
+        if rel_norm:
+            candidate = (base / rel_norm).resolve()
+            try:
+                candidate.relative_to(base)
+            except Exception:
+                candidate = base
+            start = base if is_excluded_path(candidate) else candidate
+
         if not start.exists() or not start.is_dir():
             start = base
 
-        # 除外パスの準備（prefix一致で除外）。ドキュメント化されている既定の除外 + ユーザー設定
-        state = self.load_state(project_id)
-        exclude_prefixes: List[str] = []
-        default_excludes = ["vendor", ".github", "logs", "tmp"]
-        # state の excludes は相対パス前提。正規化して prefix 用に末尾スラッシュ付与
-        for s in (state.get("excludes") or []) + default_excludes:
-            s = str(s).strip().replace("\\", "/").strip("/")
-            if not s:
-                continue
-            exclude_prefixes.append(s + "/")
+        nodes: List[Dict[str, Any]] = []
+        try:
+            with os.scandir(start) as it:
+                for entry in it:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    name = entry.name
+                    if name in EXCLUDED_NAMES:
+                        continue
+                    abs_dir = Path(entry.path).resolve()
+                    if is_excluded_path(abs_dir):
+                        continue
 
-        def is_excluded(rel_path: str) -> bool:
-            rp = rel_path.replace("\\", "/").strip("/")
-            rp_slash = rp + "/"
-            for pre in exclude_prefixes:
-                if rp_slash.startswith(pre):
-                    return True
-            return False
+                    # has_children を軽量に判定（除外対象を考慮）
+                    has_children = False
+                    try:
+                        with os.scandir(abs_dir) as it2:
+                            for ch in it2:
+                                if ch.is_dir(follow_symlinks=False) and ch.name not in EXCLUDED_NAMES:
+                                    # 子配下の除外も考慮（絶対パスで再チェック）
+                                    ch_abs = Path(ch.path).resolve()
+                                    if not is_excluded_path(ch_abs):
+                                        has_children = True
+                                        break
+                    except Exception:
+                        has_children = False
 
-        def _walk(dir_path: Path, prefix: str = "") -> List[Dict[str, Any]]:
-            out: List[Dict[str, Any]] = []
-            # scandir でファイルを列挙しつつ、ディレクトリのみを効率的に抽出
-            try:
-                with os.scandir(dir_path) as it:
-                    dirs = []
-                    for entry in it:
-                        try:
-                            if not entry.is_dir(follow_symlinks=False):
-                                continue
-                        except Exception:
-                            continue
-                        name = entry.name
-                        rel_child = f"{prefix}{name}" if not prefix else f"{prefix}{name}"
-                        if is_excluded(rel_child):
-                            continue
-                        dirs.append((name, entry.path))
-            except Exception:
-                dirs = []
-            # 名前順にソート（大文字小文字を無視）
-            dirs.sort(key=lambda t: t[0].lower())
+                    # rel の計算（base 相対の POSIX 表現）
+                    if start == base:
+                        rel_child = name
+                    else:
+                        # f-string 内でのバックスラッシュ表現を避けるため、f 文字列を使わずに生成
+                        rel_child = str(abs_dir.relative_to(base)).replace("\\", "/")
 
-            for name, path_str in dirs:
-                rel_child = f"{prefix}{name}" if not prefix else f"{prefix}{name}"
-                children = _walk(Path(path_str), rel_child + "/")
-                out.append({
-                    "name": name,
-                    "rel": rel_child.rstrip("/"),
-                    "children": children,
-                })
-            return out
-
-        # rel 指定がある場合は、その直下のツリーのみ返す（Lazy Load用途）。
-        prefix = "" if start == base else (str(start.relative_to(base)).replace("\\", "/").rstrip("/") + "/")
-        # 開始地点が除外配下の場合は、上位の呼び出し側が rel を誤っているので空ツリーを返す
-        if prefix and is_excluded(prefix.rstrip("/")):
+                    nodes.append({
+                        "name": name,
+                        "rel": rel_child,
+                        "has_children": has_children,
+                    })
+        except Exception:
+            # アクセス不可などは空配列
             return []
-        return _walk(start, prefix)
+
+        # 名前順で安定化
+        nodes.sort(key=lambda x: x["name"].lower())
+        return nodes
+
 
     @staticmethod
     def to_globs_from_state(state: Dict[str, Any]) -> Dict[str, List[str]]:

@@ -6,13 +6,18 @@
 {% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/search_paths.css') }}">
 <div class="d-flex align-items-center justify-content-between mb-3">
   <h1 class="h5 mb-0">検索パス</h1>
-  <div class="d-flex gap-2">
-    <button class="btn btn-outline-secondary btn-sm" id="btn-expand">全展開</button>
-    <button class="btn btn-outline-secondary btn-sm" id="btn-collapse">全折りたたみ</button>
-    <button class="btn btn-outline-secondary btn-sm" id="btn-select-all">全選択</button>
-    <button class="btn btn-outline-secondary btn-sm" id="btn-unselect-all">全解除</button>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <div class="input-group input-group-sm me-2 w-260">
+      <span class="input-group-text bg-white">検索</span>
+      <input type="text" class="form-control" id="filter-input" placeholder="ノード名をフィルタ" />
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-expand" title="ロード済みをすべて展開">全展開</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-collapse" title="すべて折りたたみ">全折りたたみ</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-select-all" title="ルート直下をすべて選択">全選択</button>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-unselect-all" title="ルート直下をすべて除外">全解除</button>
     <div class="btn-group">
       <button class="btn btn-outline-primary btn-sm" id="btn-apply-flask">Flask 既定</button>
       <button class="btn btn-outline-primary btn-sm" id="btn-apply-cake">CakePHP4 既定</button>
@@ -26,8 +31,9 @@
   <div class="card-header d-flex justify-content-between align-items-center">
     <div>
       <div class="small text-muted">doc_path: {{ doc_path }}</div>
-      <div class="small">選択数: <span id="sel-count">0</span> / 除外: <span id="exc-count">0</span></div>
+      <div class="small">選択数: <span id="sel-count" class="badge bg-success">0</span> / 除外: <span id="exc-count" class="badge bg-danger">0</span></div>
     </div>
+    <div class="small text-muted d-none" id="filter-hint">フィルタ中（未展開ノードは対象外）</div>
   </div>
   <div class="card-body">
     <div class="mb-2" id="tree-loading" aria-live="polite">
@@ -36,20 +42,29 @@
         <span>ツリーを読み込んでいます…</span>
       </div>
     </div>
-    <div id="tree-root"></div>
+    <div id="tree-root" class="tree" role="tree" aria-label="検索パス"></div>
   </div>
 </div>
 
-<script>
-  window.SEARCH_PATHS_BOOT = {
-    projectId: {{ project_id }},
-    endpoints: {
-      tree: "{{ url_for('docs.search_tree', project_id=project_id) }}",
-      stateGet: "{{ url_for('docs.search_paths_state', project_id=project_id) }}",
-      statePost: "{{ url_for('docs.search_paths_state', project_id=project_id) }}",
-    }
-  };
-</script>
-<script src="{{ url_for('static', filename='js/docs_search_paths.js') }}?v={{ project_id }}"></script>
+<!-- 保存完了トースト（右下） -->
+<div class="position-fixed bottom-0 end-0 p-3 z-1080">
+  <div id="save-toast" class="toast align-items-center text-bg-success border-0" role="status" aria-live="polite" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body">保存しました</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  </div>
+</div>
+
+<!-- CSRF メタは外部JS読み込みより前に配置（案1） -->
 <meta name="csrf-token" content="{{ csrf_token() }}">
+
+<!-- ルート要素の data-* にブート情報を持たせる（インラインスクリプト撤廃） -->
+<div id="search-paths-root"
+     data-project-id="{{ project_id }}"
+     data-endpoint-tree="{{ url_for('docs.search_tree', project_id=project_id) }}"
+     data-endpoint-state-get="{{ url_for('docs.search_paths_state', project_id=project_id) }}"
+     data-endpoint-state-post="{{ url_for('docs.search_paths_state', project_id=project_id) }}"></div>
+
+<script src="{{ url_for('static', filename='js/docs_search_paths.js') }}?v={{ project_id }}"></script>
 {% endblock %}

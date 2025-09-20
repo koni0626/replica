@@ -3,7 +3,11 @@ from flask_login import current_user, LoginManager
 from config import Config
 from flask import request, url_for
 from extensions import db, csrf, migrate
+from extensions import server_session as session_ext
+from flask_wtf.csrf import generate_csrf
+import os
 from controllers import register_blueprints
+from models import load_models
 
 def create_app():
     app = Flask(__name__, template_folder="templates")
@@ -12,10 +16,18 @@ def create_app():
     db.init_app(app)
     csrf.init_app(app)
     migrate.init_app(app, db)
-
-    # モデル読み込み（重要：自動検出のため）
-    from models import load_models
+    # Flask-Session（DBバックエンド）初期化
+    app.config.setdefault("SESSION_TYPE", "sqlalchemy")
+    app.config["SESSION_SQLALCHEMY"] = db
+    app.config.setdefault("SESSION_SQLALCHEMY_TABLE", "flask_sessions")
+    app.config.setdefault("SESSION_USE_SIGNER", True)
+    app.config.setdefault("SESSION_PERMANENT", True)
+    session_ext.init_app(app)
     load_models()
+    @app.context_processor
+    def inject_csrf_token():
+        # テンプレートで {{ csrf_token() }} として参照可能にする
+        return {'csrf_token': generate_csrf}
 
     # Flask-Loginのセットアップ
     login_manager = LoginManager()

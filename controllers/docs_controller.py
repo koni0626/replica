@@ -12,7 +12,7 @@ import uuid
 from werkzeug.utils import secure_filename
 
 from flask import current_app
-from services.project_service import ProjectService
+from services.project_service import ProjectService, ALLOWED_THEMES
 
 
 docs_bp = Blueprint("docs", __name__)
@@ -92,7 +92,10 @@ def _safe_media_file(p: str | Path, project_id: int, user_id: int) -> Path:
 def _ext_ok(filename: str) -> bool:
     """拡張子チェック（元のファイル名から判定）"""
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    return ext in ALLOWED_UPLOAD_EXTS
+    if not ext:
+        return False
+    allowed = set(current_app.config.get("ALLOWED_UPLOAD_EXTS", []))
+    return ext in allowed
 
 
 @docs_bp.route("/<int:project_id>", methods=["GET", "POST"])
@@ -104,6 +107,9 @@ def index(project_id: int):
     # 追加: プロジェクト名を取得
     pj = ProjectService().fetch_by_id(project_id)
     project_name = pj.project_name if pj else f"Project #{project_id}"
+    theme_class = getattr(pj, 'theme', 'theme-sky') if pj else 'theme-sky'
+    if theme_class not in ALLOWED_THEMES:
+        theme_class = 'theme-sky'
 
     total = svc.count_by_project(project_id)
 
@@ -140,6 +146,7 @@ def index(project_id: int):
         has_prev=has_prev,
         has_next=has_next,
         total=total,
+        theme_class=theme_class,
     )
 
 @docs_bp.route("/save_note/<int:doc_id>", methods=["POST"])
@@ -182,7 +189,8 @@ def upload(project_id: int):
         fs.stream.seek(0, os.SEEK_END)
         size = fs.stream.tell()
         fs.stream.seek(0)
-        if size > MAX_UPLOAD_BYTES:
+        max_bytes = int(current_app.config.get("MAX_UPLOAD_BYTES", 10 * 1024 * 1024))
+        if size > max_bytes:
             results.append({"name": orig_name, "ok": False, "error": "too_large"})
             continue
 
@@ -352,7 +360,10 @@ def search_paths(project_id: int):
     if not pj or not getattr(pj, 'doc_path', None):
         flash("このプロジェクトのdoc_pathが設定されていません。プロジェクト詳細で設定してください。", "warning")
         return redirect(url_for('docs.index', project_id=project_id))
-    return render_template('docs/search_paths.html', project_id=project_id, doc_path=pj.doc_path)
+    theme_class = getattr(pj, 'theme', 'theme-sky')
+    if theme_class not in ALLOWED_THEMES:
+        theme_class = 'theme-sky'
+    return render_template('docs/search_paths.html', project_id=project_id, doc_path=pj.doc_path, theme_class=theme_class)
 
 
 @docs_bp.route("/<int:project_id>/search_tree", methods=["GET"])

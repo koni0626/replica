@@ -6,47 +6,51 @@
 {% endblock %}
 
 {% block content %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/knowledge.css') }}">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0 text-truncate">{{ project_name }} / ナレッジ</h1>
     <a class="btn btn-primary" href="{{ url_for('knowledge.create', project_id=project_id) }}">新規追加</a>
   </div>
 
   {% if knowledge %}
-    <ul class="list-group">
+    <div class="accordion" id="knowledgeAcc" role="tablist" aria-multiselectable="true">
       {% for k in knowledge %}
-        <li class="list-group-item">
-          <h5>{{ k.title }}</h5>
-          <p class="text-muted small mb-1">カテゴリ: {{ k.category or '未分類' }}</p>
-
-          <div id="kc-{{ k.knowledge_id }}">
-            <!-- 要約（初期表示）: 最初は要約を表示 -->
-            <div class="kc-summary text-break" style="white-space: pre-wrap;">
-              {{ (k.content or '')[:100] }}{% if (k.content or '')|length > 100 %}...{% endif %}
+        <div class="accordion-item" id="item-{{ k.knowledge_id }}">
+          <h2 class="accordion-header d-flex align-items-center" id="heading-{{ k.knowledge_id }}">
+            <button class="accordion-button collapsed flex-grow-1 text-truncate" type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#kc-{{ k.knowledge_id }}"
+                    aria-expanded="false"
+                    aria-controls="kc-{{ k.knowledge_id }}">
+              {{ k.title or '(無題)' }}
+            </button>
+            <div class="ms-3 me-2 d-flex align-items-center gap-3 flex-shrink-0 flex-nowrap knowledge-actions">
+              <a href="{{ url_for('knowledge.edit', project_id=project_id, knowledge_id=k.knowledge_id) }}"
+                 class="btn btn-outline-secondary">
+                編集
+              </a>
+              <form method="post" action="{{ url_for('knowledge.delete', project_id=project_id, knowledge_id=k.knowledge_id) }}" class="d-inline" data-confirm="削除しますか？">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger">削除</button>
+              </form>
             </div>
-
-            {% if (k.content or '')|length > 100 %}
-              <!-- 全文（初期は非表示） -->
-              <div class="kc-full text-break d-none" style="white-space: pre-wrap;">
-                {{ k.content or '' }}
-              </div>
-              <a href="#" class="kc-toggle" id="toggle-{{ k.knowledge_id }}">もっと見る</a>
-            {% endif %}
+          </h2>
+          <div id="kc-{{ k.knowledge_id }}" class="accordion-collapse collapse" aria-labelledby="heading-{{ k.knowledge_id }}" data-bs-parent="#knowledgeAcc">
+            <div class="accordion-body">
+              <div id="md-{{ k.knowledge_id }}" class="markdown-body"></div>
+              <textarea id="mdsrc-{{ k.knowledge_id }}" class="d-none">{{ k.content or '' }}</textarea>
+            </div>
           </div>
-
-          <div class="mt-2">
-            <a href="{{ url_for('knowledge.edit', project_id=project_id, knowledge_id=k.knowledge_id) }}" class="btn btn-sm btn-outline-secondary">編集</a>
-            <form method="post" action="{{ url_for('knowledge.delete', project_id=project_id, knowledge_id=k.knowledge_id) }}" class="d-inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('削除しますか？')">削除</button>
-            </form>
-          </div>
-        </li>
+        </div>
       {% endfor %}
-    </ul>
+    </div>
   {% else %}
     <div class="alert alert-info">ナレッジが登録されていません。</div>
   {% endif %}
 
-  <!-- ページ専用スクリプトを外部ファイルに分離 -->
+  <!-- 必要なライブラリ（marked / DOMPurify） -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  <!-- ページ専用スクリプト -->
   <script src="{{ url_for('static', filename='js/knowledge_index.js') }}"></script>
 {% endblock %}

@@ -391,7 +391,7 @@
         const data = await resp.json();
         if (!data.ok) { showToast('アップロードに失敗しました'); return; }
         // UI反映（チップだけ追加）。プロンプトへの自動追記は行わない。
-        for (const it of data.files || []){
+        for (const it of (data.files || [])){
           if (it.ok){
             addChip(it);
           } else {
@@ -470,6 +470,22 @@
       if (evt.target && evt.target.id === 'commits-section') {
         renderCommitsSection();
         document.getElementById('commits-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+
+    // ========= イベント委譲でボタン操作をハンドリング（inline属性撤廃対応） =========
+    document.body.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      if (action === 'copy-markdown') {
+        const targetId = btn.getAttribute('data-target');
+        if (targetId) window.copyMarkdown(targetId);
+      } else if (action === 'save-note') {
+        window.saveNote();
+      } else if (action === 'show-diff') {
+        // 既存の diff 表示処理が docs_index_diff.js 側にある前提で、そのイベントトリガとしてボタンを残す
+        // ここでは特に処理しない（必要ならカスタムイベントを発火）
       }
     });
 

@@ -6,6 +6,7 @@
 {% endblock %}
 
 {% block content %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/docs.css') }}">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h1 class="h5 mb-0 text-truncate">{{ project_name }}</h1>
     <a href="{{ url_for('projects.index') }}" class="btn btn-outline-secondary btn-sm">プロジェクト一覧へ</a>
@@ -32,7 +33,7 @@
                      class="d-none"
                      multiple
                      accept=".txt,.md,.markdown,.json,.yaml,.yml,.csv,.htm,.html,.docx,.pptx,.xlsx,.pdf,.py,.js,.ts,.java,.php,.go,.rb,.cs,.sh,.sql,.css" />
-              <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap flex-shrink-0" style="word-break: keep-all;" id="btn-upload-trigger">
+              <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap flex-shrink-0 wb-keep" id="btn-upload-trigger">
                 添付ファイルを追加
               </button>
 
@@ -45,7 +46,7 @@
             {% for e in form.prompt.errors %}
               <div class="text-danger small">{{ e }}</div>
             {% endfor %}
-            <div class="border rounded p-3 bg-light" id="prompt-preview" style="min-height: 8rem;">
+            <div class="border rounded p-3 bg-light" id="prompt-preview">
               <div class="text-muted">（プロンプトのMarkdownプレビューがここに表示されます）</div>
             </div>
 
@@ -72,12 +73,12 @@
 
             <div id="loading-spinner" class="d-none mb-3">
               <div class="d-flex align-items-center gap-2">
-                <div class="spinner-border text-primary" role="status" aria-hidden="true"></div>
-                <span class="text-muted">生成中です…</span>
+                <img src="https://media1.tenor.com/m/RmAouIRT59MAAAAC/%E3%83%80%E3%83%B3%E3%82%B9-%E8%80%83%E3%81%88%E4%B8%AD.gif" alt="考え中…" class="loading-anim" />
+                <span class="text-muted">考え中…</span>
               </div>
             </div>
 
-            <div class="border rounded p-3 bg-light mb-3" id="output-preview" style="min-height: 12rem;">
+            <div class="border rounded p-3 bg-light mb-3" id="output-preview">
               <div class="text-muted">（GPT生成結果のMarkdownプレビューがここに表示されます）</div>
             </div>
             {{ form.generated_content(class="form-control", id="output-input", rows="10", placeholder="必要ならここで加筆修正してからコミットできます") }}
@@ -104,7 +105,8 @@
               {% if current_left %}
                 <button type="button"
                         class="btn btn-sm btn-outline-primary"
-                        onclick="copyMarkdown('commit-left-src')"
+                        data-action="copy-markdown"
+                        data-target="commit-left-src"
                         title="左ペインのMarkdownをコピー">
                   MDコピー
                 </button>
@@ -144,7 +146,7 @@
             <div class="mt-3">
               <label for="note-input" class="form-label">メモ</label>
               <textarea id="note-input" class="form-control" rows="3">{{ current_left.note | default('') }}</textarea>
-              <button type="button" class="btn btn-primary btn-sm" onclick="saveNote()">保存</button>
+              <button type="button" class="btn btn-primary btn-sm" data-action="save-note">保存</button>
             </div>
           {% else %}
             <div class="text-muted">左側に表示するプロンプトがありません。</div>
@@ -158,7 +160,8 @@
               {% if current_right %}
                 <button type="button"
                         class="btn btn-sm btn-outline-primary"
-                        onclick="copyMarkdown('commit-right-src')"
+                        data-action="copy-markdown"
+                        data-target="commit-right-src"
                         title="右ペインのMarkdownをコピー">
                   MDコピー
                 </button>
@@ -226,58 +229,6 @@
 
   <!-- htmx -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-
-  <style>
-    #commits-section { scroll-margin-top: 72px; }
-    .htmx-indicator { display:none; }
-    .htmx-request .htmx-indicator { display:inline-block; }
-
-    .copy-toast{
-      position: fixed;
-      left: 50%;
-      bottom: 16px;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,.85);
-      color:#fff;
-      padding: 8px 12px;
-      border-radius: 8px;
-      opacity: 0;
-      transition: opacity .2s ease;
-      z-index: 1050;
-      font-size: .9rem;
-    }
-    .copy-toast.show{ opacity: 1; }
-
-    pre { position: relative; }
-
-    .copy-button {
-      position: absolute;
-      top: 0;
-      right: 0;
-      background: #f8f9fa;
-      border: 1px solid #ced4da;
-      border-radius: 0.25rem;
-      padding: 0.15rem 0.3rem;
-      cursor: pointer;
-      font-size: 0.75rem;
-    }
-
-    /* 添付ファイルのチップ */
-    .att-chip{
-      display: inline-flex;
-      align-items: center;
-      gap: .25rem;
-      background: #eef2ff;
-      border: 1px solid #c7d2fe;
-      border-radius: 9999px;
-      padding: .15rem .5rem;
-      font-size: .85rem;
-    }
-    .att-chip .remove{
-      cursor: pointer;
-      color: #555;
-    }
-  </style>
 
   <!-- ページ専用スクリプト（外部JS） -->
   <div id="docs-root"
