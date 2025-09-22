@@ -74,7 +74,7 @@
             <div id="loading-spinner" class="d-none mb-3">
               <div class="d-flex align-items-center gap-2">
                 <img src="https://media1.tenor.com/m/RmAouIRT59MAAAAC/%E3%83%80%E3%83%B3%E3%82%B9-%E8%80%83%E3%81%88%E4%B8%AD.gif" alt="考え中…" class="loading-anim" />
-                <span class="text-muted">考え中…</span>
+                <span class="text-muted" id="loading-elapsed">考え中…</span>
               </div>
             </div>
 
@@ -239,6 +239,37 @@
        data-left-doc-id="{{ current_left.doc_id }}"
        data-csrf="{{ form.csrf_token._value() }}"
        {% endif %}></div>
+
+  <!-- ストリーム待機中の経過秒を表示する（loading-spinner の表示/非表示を監視） -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      const spinner = document.getElementById('loading-spinner');
+      const label = document.getElementById('loading-elapsed');
+      if (!spinner || !label) return;
+      let t0 = 0;
+      let timerId = null;
+      function start() {
+        t0 = performance.now();
+        if (timerId) clearInterval(timerId);
+        label.textContent = '経過 0.0 秒';
+        timerId = setInterval(() => {
+          const sec = (performance.now() - t0) / 1000;
+          label.textContent = `経過 ${sec.toFixed(1)} 秒`;
+        }, 100);
+      }
+      function stop() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      }
+      const observer = new MutationObserver(() => {
+        const shown = !spinner.classList.contains('d-none');
+        if (shown) start(); else stop();
+      });
+      observer.observe(spinner, { attributes: true, attributeFilter: ['class'] });
+    });
+  </script>
 
   <script src="{{ url_for('static', filename='js/docs_index.js') }}"></script>
   <script src="{{ url_for('static', filename='js/docs_index_diff.js') }}"></script>
