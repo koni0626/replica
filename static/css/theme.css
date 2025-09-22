@@ -1,0 +1,44 @@
+:root {
+  --accent:#3B82F6; --surface:#F8FAFC; --on-accent:#fff; --text:#111827; --nav: var(--accent);
+}
+/* Light themes */
+.theme-sky      { --accent:#3B82F6; --surface:#EFF6FF; --on-accent:#fff; --text:#0f172a; --nav: var(--accent); --sidebar:#1D4ED8; }
+.theme-emerald  { --accent:#10B981; --surface:#ECFDF5; --on-accent:#fff; --text:#064e3b; --nav: var(--accent); --sidebar:#047857; }
+.theme-amber    { --accent:#F59E0B; --surface:#FFFBEB; --on-accent:#1F2937; --text:#78350f; --nav: var(--accent); --sidebar:#B45309; }
+
+body.theme-sky,
+body.theme-emerald,
+body.theme-amber {
+  background: var(--surface);
+  color: var(--text);
+}
+/* Navbar (use darker theme color) */
+.navbar { background-color: var(--sidebar, var(--nav)) !important; color: #fff !important; }
+.navbar .navbar-brand, .navbar .nav-link { color: #fff !important; }
+.navbar .nav-link.active { filter: brightness(1.1); }
+
+/* Sidebar (currently same background as navbar was; keep as nav unlessご要望) */
+.sidebar { background-color: var(--nav) !important; color: #fff !important; }
+.sidebar .sidebar-heading { color: #fff !important; opacity: .95; }
+.sidebar .nav-link { color: #fff !important; }
+.sidebar .nav-link:hover, .sidebar .nav-link:focus { color: #fff !important; filter: brightness(1.05); text-decoration: none; }
+.sidebar .nav-link.active { background: rgba(255,255,255,0.1); border-radius: .25rem; }
+
+/* Footer (use darker theme color same as navbar) */
+.app-footer { background-color: var(--sidebar, var(--nav)) !important; color: #fff !important; }
+.app-footer a { color: #fff !important; }
+.app-footer a:hover { filter: brightness(1.1); }
+
+/* Accent helpers */
+.bg-accent { background-color: var(--accent) !important; color: var(--on-accent) !important; }
+.text-accent { color: var(--accent) !important; }
+.border-accent { border-color: var(--accent) !important; }
+.btn-accent { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn-accent:hover { filter: brightness(0.9); }
+
+/* Theme selection cards (preview) */
+.theme-card[data-theme="theme-sky"]     { --accent:#3B82F6; --surface:#EFF6FF; --on-accent:#fff; --text:#0f172a; }
+.theme-card[data-theme="theme-emerald"] { --accent:#10B981; --surface:#ECFDF5; --on-accent:#fff; --text:#064e3b; }
+.theme-card[data-theme="theme-amber"]   { --accent:#F59E0B; --surface:#FFFBEB; --on-accent:#1F2937; --text:#78350f; }
+.theme-card .card-header { background: var(--accent); color: var(--on-accent); }
+.theme-card .card-body   { background: var(--surface); color: var(--text); }

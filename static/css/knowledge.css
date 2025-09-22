@@ -1,0 +1,12 @@
+#knowledgeAcc .knowledge-actions { white-space: nowrap; }
+#knowledgeAcc .knowledge-actions .btn {
+  min-width: 72px; /* prevent vertical stacking */
+  padding: 0.5rem 0.9rem;
+  font-weight: 500;
+}
+@media (max-width: 576px) {
+  #knowledgeAcc .knowledge-actions .btn { min-width: 64px; }
+}
+
+/* form preview */
+#content-preview { min-height: 20rem; }

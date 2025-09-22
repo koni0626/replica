@@ -64,7 +64,7 @@ flask db upgrade
 ```bash
 export FLASK_APP="app:create_app"
 flask db init
-flask db migrate -m "init schema"
+flask db migrate -m "color change"
 flask db upgrade
 ```
 
@@ -97,3 +97,13 @@ flask db upgrade
 
 必要なら、`requirements.txt` に `Flask-Migrate` も追記しておくとチーム運用が楽です。
 詰まったログやエラーがあれば貼ってください。こちらで原因を特定します。
+
+DBのマイグレーションが失敗したとき
+```
+apt update
+apt install sqlite3
+sqlite3 /app/instance/replica.db
+
+ALTER TABLE projects
+ADD COLUMN theme TEXT NOT NULL DEFAULT 'theme-sky';
+```

@@ -1,0 +1,51 @@
+#commits-section { scroll-margin-top: 72px; }
+.htmx-indicator { display:none; }
+.htmx-request .htmx-indicator { display:inline-block; }
+
+.copy-toast{
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.85);
+  color:#fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity .2s ease;
+  z-index: 1050;
+  font-size: .9rem;
+}
+.copy-toast.show{ opacity: 1; }
+
+pre { position: relative; }
+.copy-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #f8f9fa;
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.3rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+/* 添付ファイルのチップ */
+.att-chip{
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 9999px;
+  padding: .15rem .5rem;
+  font-size: .85rem;
+}
+.att-chip .remove{ cursor: pointer; color: #555; }
+
+/* Page specific utilities */
+.wb-keep { word-break: keep-all; }
+#prompt-preview { min-height: 8rem; }
+#output-preview { min-height: 12rem; }
+#loading-spinner .loading-anim { width: 256px; height: 256px; object-fit: contain; }
