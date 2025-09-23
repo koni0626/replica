@@ -124,11 +124,24 @@
     }
 
     // --- 知識化（左: プロンプト / 右: 回答） ---
-    // ボタンにイベントバインド（inline onclick を使わずに addEventListener で紐付け）
-    const btnKnowLeft  = document.getElementById('btn-knowledge-left');
-    const btnKnowRight = document.getElementById('btn-knowledge-right');
-    if (btnKnowLeft)  btnKnowLeft.addEventListener('click',  () => knowledgeFromPrompt('left'));
-    if (btnKnowRight) btnKnowRight.addEventListener('click', () => knowledgeFromPrompt('right'));
+    // デリゲーション方式で、htmx によるDOM差し替え後も有効にする
+    document.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (!t || typeof t.closest !== 'function') return;
+      // 左ペイン（プロンプト）ボタン
+      if (t.closest('#btn-knowledge-left')) {
+        ev.preventDefault();
+        knowledgeFromPrompt('left');
+        return;
+      }
+      // 右ペイン（回答）ボタン
+      if (t.closest('#btn-knowledge-right')) {
+        ev.preventDefault();
+        knowledgeFromPrompt('right');
+        return;
+      }
+    });
+
     async function knowledgeFromPrompt(which){
       try{
         const csrf = document.querySelector("input[name='csrf_token']")?.value;
