@@ -240,7 +240,7 @@
        data-csrf="{{ form.csrf_token._value() }}"
        {% endif %}></div>
 
-  <!-- ストリーム待機中の経過秒を表示する（loading-spinner の表示/非表示を監視） -->
+  <!-- ストリーム待機中の経過秒をタブタイトルにも表示する（loading-spinner の表示/非表示を監視） -->
   <script>
     document.addEventListener('DOMContentLoaded', function(){
       const spinner = document.getElementById('loading-spinner');
@@ -248,13 +248,18 @@
       if (!spinner || !label) return;
       let t0 = 0;
       let timerId = null;
+      const originalTitle = document.title;
+      function update(sec){
+        label.textContent = `経過 ${sec.toFixed(1)} 秒`;
+        document.title = `⏳ ${sec.toFixed(1)}秒 | ${originalTitle}`;
+      }
       function start() {
         t0 = performance.now();
         if (timerId) clearInterval(timerId);
-        label.textContent = '経過 0.0 秒';
+        update(0);
         timerId = setInterval(() => {
           const sec = (performance.now() - t0) / 1000;
-          label.textContent = `経過 ${sec.toFixed(1)} 秒`;
+          update(sec);
         }, 100);
       }
       function stop() {
@@ -262,6 +267,7 @@
           clearInterval(timerId);
           timerId = null;
         }
+        document.title = originalTitle;
       }
       const observer = new MutationObserver(() => {
         const shown = !spinner.classList.contains('d-none');
