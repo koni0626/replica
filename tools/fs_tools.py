@@ -195,11 +195,46 @@ def read_file(file_name: str, project_id: int) -> str:
         return f.read()
 
 
+# 補助: search_paths.json の includes へファイル（doc_path 相対 POSIX）を追加
+# 失敗しても write_file 自体は成功扱いにするため、例外は握り潰します。
+def _add_to_search_includes(project_id: int, rel_path: str) -> None:
+    try:
+        inst = Path.cwd() / "instance" / str(project_id)
+        inst.mkdir(parents=True, exist_ok=True)
+        sp = inst / "search_paths.json"
+        if sp.exists():
+            try:
+                data = json.loads(sp.read_text(encoding="utf-8")) or {}
+            except Exception:
+                data = {}
+        else:
+            data = {}
+        includes = list(data.get("includes") or [])
+        excludes = list(data.get("excludes") or [])
+        rel_norm = str(rel_path).replace("\\", "/").strip("/")
+        if rel_norm and rel_norm not in includes:
+            includes.append(rel_norm)
+        # バージョンは v2 を既定とする
+        try:
+            ver = int(data.get("version") or 2)
+        except Exception:
+            ver = 2
+        data["version"] = ver
+        data["includes"] = includes
+        data["excludes"] = excludes
+        sp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 @tool
 def write_file(file_path: str, content: str, project_id: int) -> bool:
     """
     第1引数に指定されたパスへ UTF-8 テキストを書き込みます（上書き）。
     相対パスが指定された場合は doc_path 配下を基準として解決し、doc_path の外を指す場合は書き込みません。
+
+    追記: 新規作成時は instance/<project_id>/search_paths.json の includes に
+    当該ファイル（doc_path 相対 POSIX）を自動追加します。
     """
     try:
         base = resolve_doc_path(project_id)
@@ -211,9 +246,16 @@ def write_file(file_path: str, content: str, project_id: int) -> bool:
             _ = p.relative_to(base)
         except Exception:
             return False
+        existed_before = p.exists()
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
+        if not existed_before:
+            try:
+                rel_from_doc = p.relative_to(base).as_posix()
+                _add_to_search_includes(project_id, rel_from_doc)
+            except Exception:
+                pass
         return True
     except Exception:
         return False
