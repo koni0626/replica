@@ -89,7 +89,15 @@ def list_files(
         raise ValueError("list_files: project_id は必須です")
 
     # 既定の拡張子セット（未指定時）
-    default_exts = {".py", ".html", ".php", ".js"}
+    default_exts = {".py", ".pyi",
+                    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+                    ".php",
+                    ".phtml", ".html", ".htm", ".css", ".scss", ".less",
+                    ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml",
+                    ".ini", ".env", ".md", ".mdx", ".txt", ".csv", ".tsv",
+                    ".sql", ".xml", ".sh", ".bat", ".ps1", ".properties",
+                    ".cfg", ".conf"}
+
     allow_exts = normalize_exts(include_exts, default_set=default_exts)
 
     results = scan_tree(
