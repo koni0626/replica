@@ -21,7 +21,7 @@ EXCLUDED_NAMES_DEFAULT: Set[str] = {
 def load_search_paths_state(project_id: Optional[int]) -> Dict[str, List[str]]:
     """
     instance/<project_id>/search_paths.json を読み、正規化済みの includes/excludes を返す。
-    返却: {"includes": [...], "excludes": [...]}（両方とも POSIX 相対パスの配列）
+    返却:{"includes": [...], "excludes": [...]}（両方とも POSIX 相対パスの配列）
     project_id 無指定や未存在時は空配列を返す。
     """
     state = {"includes": [], "excludes": []}
@@ -36,6 +36,7 @@ def load_search_paths_state(project_id: Optional[int]) -> Dict[str, List[str]]:
         ver = int(data.get("version") or 1)
         inc = data.get("includes") or []
         exc = data.get("excludes") or []
+
         def _norm_list(lst):
             out = []
             for s in lst:
@@ -43,6 +44,7 @@ def load_search_paths_state(project_id: Optional[int]) -> Dict[str, List[str]]:
                 if s:
                     out.append(s)
             return out
+
         inc_n = _norm_list(inc)
         exc_n = _norm_list(exc)
         # v1 の includes（ディレクトリ含む）は一旦そのまま返す（呼び出し側で祖先許容する箇所があれば考慮）。
@@ -58,10 +60,11 @@ def load_search_paths_state(project_id: Optional[int]) -> Dict[str, List[str]]:
 def load_search_paths_globs(project_id: Optional[int]) -> dict:
     """
     includes/excludes を globs として返す（後方互換）。
-    返却: {"include_globs": ["path/**",...], "exclude_globs": ["path/**",...]}
+    返却:{"include_globs": ["path/**",...], "exclude_globs": ["path/**",...]}
     """
     globs = {"include_globs": [], "exclude_globs": []}
     state = load_search_paths_state(project_id)
+
     def _to_globs(paths: List[str]) -> List[str]:
         out: List[str] = []
         for s in paths or []:
@@ -69,6 +72,7 @@ def load_search_paths_globs(project_id: Optional[int]) -> dict:
             if s:
                 out.append(f"{s}/**")
         return out
+
     globs["include_globs"] = _to_globs(state.get("includes") or [])
     globs["exclude_globs"] = _to_globs(state.get("excludes") or [])
     return globs
@@ -108,6 +112,7 @@ def path_matches_globs(rel_posix: str, globs: List[str], is_dir: bool = False) -
             return True
     return False
 
+
 def normalize_exts(exts, default_set: Optional[Set[str]] = None) -> Set[str]:
     if exts is None:
         return set(default_set or [])
@@ -123,13 +128,32 @@ def normalize_exts(exts, default_set: Optional[Set[str]] = None) -> Set[str]:
         out.add(s)
     return out or set(default_set or [])
 
+
 def rel_posix(p: Path, base: Path) -> str:
     return p.resolve().relative_to(base).as_posix()
+
 
 def pattern_match(rel: str, pattern: Optional[str]) -> bool:
     if not pattern:
         return True
     return fnmatch.fnmatch(rel, pattern)
+
+
+def includes_pattern_match(rel: str, pattern: Optional[str]) -> bool:
+    """
+    includes に保存された相対パス（doc_path 相対）に対するマッチ。
+    互換のため、先頭が "**/" のパターンはそのプレフィックスを取り除いたものでもマッチ可とする。
+    特別扱い: pattern == "**/*" は全許可。
+    """
+    if not pattern or pattern == "**/*":
+        return True
+    if fnmatch.fnmatch(rel, pattern):
+        return True
+    if pattern.startswith("**/"):
+        alt = pattern[3:]
+        if fnmatch.fnmatch(rel, alt):
+            return True
+    return False
 
 # -----------------
 # 統合スキャナ（新仕様: includes は“ファイル集合のホワイトリスト”）
@@ -156,6 +180,8 @@ def scan_tree(
     allow_ancestor_for_include: bool = False,
     # 追加: パターンの適用先を "includes" に切替（True のとき、pattern は includes の相対パスに対してマッチ）
     pattern_on_includes: bool = False,
+    # 追加: search_paths.json の excludes を無視する（.git/vendor等の既定除外は維持）
+    ignore_excludes: bool = True,
 ) -> List[str]:
     """
     find_files / list_files / list_dirs 用の共通走査エンジン（新仕様）。
@@ -165,19 +191,33 @@ def scan_tree(
     - pattern_on_includes=True の場合、pattern は base_path 相対ではなく「includes に保存された相対パス（doc_path 相対）」に対して適用する。
     - base_path 相対の POSIX 文字列配列を返す。
     - 特別扱い: pattern == "**/*" の場合は「全許可」と解釈し、トップレベル（スラッシュを含まない）も除外しない。
+    - ignore_excludes=True の場合、search_paths.json の excludes は評価しない（既定の巨大ディレクトリ除外は維持）。
     """
-    root = Path(base_path).expanduser().resolve()
+    # doc_path 解決
     doc_path: Optional[Path] = None
-
     if project_id is not None:
         doc_path = resolve_doc_path(project_id).expanduser().resolve()
+    elif require_project:
+        raise ValueError("project_id is required")
+
+    # base_path の解決（相対が来た場合は doc_path 基準で解決／'repo' は doc_path のエイリアスとして扱う）
+    bp_raw = str(base_path or "").strip()
+    p = Path(bp_raw).expanduser()
+    if doc_path is not None:
+        if not p.is_absolute():
+            if bp_raw in ("", ".", "repo"):
+                root = doc_path
+            else:
+                root = (doc_path / p).resolve()
+        else:
+            root = p.resolve()
+        # ガード: base_path は doc_path 配下のみ許容
         try:
             _ = root.relative_to(doc_path)
         except Exception:
-            raise ValueError(
-                f"base_path must be under doc_path (base_path={root}, doc_path={doc_path})")
-    elif require_project:
-        raise ValueError("project_id is required")
+            raise ValueError(f"base_path must be under doc_path (base_path={root}, doc_path={doc_path})")
+    else:
+        root = p.resolve()
 
     if not root.exists() or not root.is_dir():
         return []
@@ -185,7 +225,10 @@ def scan_tree(
     # 新仕様: ファイル集合のロード
     state = load_search_paths_state(project_id)
     includes_files = state.get("includes") or []
+    includes_set = set(includes_files)
     excludes = set(state.get("excludes") or [])
+    if ignore_excludes:
+        excludes = set()
 
     if require_search_paths and not includes_files:
         # 明示的に何も選択されていなければ結果なし
@@ -209,7 +252,9 @@ def scan_tree(
             rel_from_doc = abs_f.resolve().relative_to(doc_path or root).as_posix()
         except Exception:
             return
-        if any(rel_from_doc == e or rel_from_doc.startswith(e + "/") for e in excludes):
+        # ルール: 明示的に includes に入っているファイルは、excludes の祖先一致より優先する（explicit include wins）
+        explicit = rel_from_doc in includes_set
+        if excludes and (not explicit) and any(rel_from_doc == e or rel_from_doc.startswith(e + "/") for e in excludes):
             return
         # base_path 配下のみ
         try:
@@ -239,7 +284,7 @@ def scan_tree(
             # pattern を includes のパスに対して適用するオプション
             if pattern and pattern_on_includes:
                 # 特別扱い: "**/*" は全許可（トップレベルも含める）
-                if pattern != "**/*" and not pattern_match(rel, pattern):
+                if not includes_pattern_match(rel, pattern):
                     continue
             abs_t = (doc_path or root) / rel
             if abs_t.is_file():
@@ -284,7 +329,7 @@ def scan_tree(
         # pattern を includes のパスに対して適用するオプション
         if pattern and pattern_on_includes:
             # 特別扱い: "**/*" は全許可（トップレベルも含める）
-            if pattern != "**/*" and not pattern_match(rel, pattern):
+            if not includes_pattern_match(rel, pattern):
                 continue
         abs_t = (doc_path or root) / rel
         if abs_t.is_file():

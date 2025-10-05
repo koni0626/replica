@@ -49,10 +49,11 @@ class ProjectService(object):
         if inherited_theme not in ALLOWED_THEMES:
             inherited_theme = 'theme-sky'
 
+        # 仕様変更: doc_path を元プロジェクトから引き継ぐ
         new_project = Projects(
             project_name=new_name,
             description=original_project.description,
-            doc_path=None,
+            doc_path=original_project.doc_path,
             theme=inherited_theme
         )
         db.session.add(new_project)

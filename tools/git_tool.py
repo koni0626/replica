@@ -102,8 +102,17 @@ try:
     # 既存 tools.tools の doc_path 解決を流用
     from tools.tools import _resolve_doc_path as _resolve_doc_path  # type: ignore
 except Exception:
+    # フォールバック: services.project_service を用いて doc_path を解決
     def _resolve_doc_path(project_id: int) -> Path:
-        raise ValueError("git_tool: _resolve_doc_path is not available. Import from tools.tools or implement here.")
+        from services.project_service import ProjectService  # 遅延インポートで依存を最小化
+        ps = ProjectService()
+        proj = ps.fetch_by_id(project_id)
+        if not proj or not getattr(proj, "doc_path", None):
+            raise ValueError("doc_path_not_set")
+        base = Path(proj.doc_path).expanduser().resolve()
+        if (not base.exists()) or (not base.is_dir()):
+            raise ValueError("invalid_doc_path")
+        return base
 
 
 def _ensure_under_doc_path(p: Path, doc_path: Path) -> Path:
@@ -120,13 +129,20 @@ def _resolve_repo_root_for_project(project_id: int, repo_path: Optional[str]) ->
     """
     必ず doc_path をリポジトリルートとして返す。
     repo_path が与えられた場合も doc_path 配下であることのみ検証する。
+    特別扱い: repo_path が None/""/"."/"repo" の場合は doc_path を返す。
+    相対パスは doc_path 起点で解決し、絶対パスは doc_path 配下であることを検証する。
     """
     doc_path = Path(_resolve_doc_path(project_id)).expanduser().resolve()
     if not doc_path.exists() or not doc_path.is_dir():
         raise ValueError(f"doc_path not found or not directory: {doc_path}")
 
-    if repo_path:
-        _ensure_under_doc_path(Path(repo_path), doc_path)  # 妥当性チェックのみ
+    if not repo_path or repo_path in (".", "repo"):
+        return str(doc_path)
+
+    p = Path(repo_path)
+    if not p.is_absolute():
+        p = (doc_path / p)
+    _ensure_under_doc_path(p, doc_path)  # 妥当性チェックのみ
 
     return str(doc_path)
 

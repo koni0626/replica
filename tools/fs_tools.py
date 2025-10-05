@@ -44,6 +44,7 @@ def find_files(base_path: str,
     - ディレクトリ段階での枝刈り（.git / vendor / .github / logs / node_modules / .venv / __pycache__）は共通ロジックに準拠。
     - includes/excludes の globs は使用せず、includes のファイル集合をフィルタして返します。
     - pattern_on_includes=True の場合、pattern は base_path 相対ではなく「includes に保存された相対パス（doc_path 相対）」に対してマッチします。
+    - excludes は無視します（ignore_excludes=True）。明示的に includes に入っているものを優先します。
     """
     if project_id is None:
         raise ValueError("find_files: project_id は必須です（検索対象は検索パスにチェックされたファイルのみ）")
@@ -62,6 +63,8 @@ def find_files(base_path: str,
         require_search_paths=True,
         allow_ancestor_for_include=False,
         pattern_on_includes=pattern_on_includes,
+        # 追加: excludes を見ない
+        ignore_excludes=True,
     )
     return "\n".join(results)
 
@@ -76,12 +79,12 @@ def list_files(
 ) -> str:
     """
     base_path 配下のファイルを拡張子フィルタで列挙し、相対パス（base_path 相対）を改行区切りで返します。
-    ただし検索対象は doc_path 配下に限定し、検索スコープは search_paths.json（includes/excludes）に必ず従います。
+    ただし検索対象は doc_path 配下に限定し、検索スコープは search_paths.json（includes）に必ず従います。
 
     変更点:
     - project_id を必須化（None はエラー）。
     - base_path は doc_path 配下である必要があり、外を指す場合はエラー。
-    - search_paths.json の include/exclude を「走査枝刈り」に適用して高速化。
+    - search_paths.json の excludes は無視します（ignore_excludes=True）。
     - .git / vendor / .github / logs / node_modules / .venv / __pycache__ は探索から除外。
     - shallow=True の場合は「base_path 直下のファイルのみ」（サブディレクトリ配下は除外）。
     """
@@ -108,6 +111,7 @@ def list_files(
         require_project=True,
         require_search_paths=True,
         allow_ancestor_for_include=False,
+        ignore_excludes=True,
     )
 
     if shallow:
@@ -131,7 +135,7 @@ def list_dirs(
 ) -> str:
     """
     base_path配下から、ディレクトリのみを検索して相対パスを改行区切りで返します。
-    - 検索対象は doc_path 配下に限定し、search_paths.json（includes/excludes）に従って走査範囲を枝刈りします。
+    - 検索対象は doc_path 配下に限定し、search_paths.json（includes）に従って走査範囲を枝刈りします。
     - .git / vendor など巨大ディレクトリは、ディレクトリ段階で除外します。
 
     例: list_dirs("repo", "src/*") -> "src/components\nsrc/utils\n..."
@@ -160,6 +164,7 @@ def list_dirs(
         require_search_paths=True,
         allow_ancestor_for_include=True,
         pattern_on_includes=pattern_on_includes,
+        ignore_excludes=True,
     )
 
     if shallow:
@@ -177,7 +182,7 @@ def list_dirs(
 def read_file(file_name: str, project_id: int) -> str:
     """
     引き数に指定されたファイルの内容を読み取り、テキストで返却する。
-    相対パスが指定された場合は doc_path 配下を基準として解決し、doc_path の外を指す場合はエラーとする。
+    相対パスが指定された場合は doc_path を基準に解決し、doc_path の外を指す場合はエラーとする。
     """
     base = resolve_doc_path(project_id)
 
@@ -415,7 +420,7 @@ def search_grep(
     """
     ディレクトリ配下を正規表現で検索します（簡易版）。
     - 検索対象は doc_path 配下のみ。base_path が doc_path の外を指す場合はエラー。
-    - 検索ディレクトリのスコープは search_paths.json の include/exclude に従う。
+    - 検索ディレクトリのスコープは search_paths.json の includes に準拠し、excludes は無視します。
     - スコープ評価は fs_modules.scan_tree に委譲し、include 優先（祖先許容）で統一。
     """
     start_ts = time.time()
@@ -486,6 +491,7 @@ def search_grep(
             require_search_paths=True,
             allow_ancestor_for_include=True,
             max_items=max_files,
+            ignore_excludes=True,
         )
     except Exception as e:
         result["ok"] = False
@@ -497,6 +503,9 @@ def search_grep(
     total_matches = 0
     scanned_bytes = 0
     global_truncated = False
+
+    # 1行テキストの上限（minified対策）
+    LINE_SNIPPET_MAX = 500
 
     for rel in candidates:
         if timeout_seconds and (time.time() - start_ts) > timeout_seconds:
@@ -544,15 +553,19 @@ def search_grep(
                 col_end = m.end() + 1
 
                 before_start = max(0, i - 1 - context_lines)
-                before = [l.rstrip("\n") for l in lines[before_start: i - 1]] if context_lines > 0 else []
+                before = [l.rstrip("\n")[:LINE_SNIPPET_MAX] + ("...(truncated)" if len(l.rstrip("\n")) > LINE_SNIPPET_MAX else "") for l in lines[before_start: i - 1]] if context_lines > 0 else []
                 after_end = min(len(lines), i + context_lines)
-                after = [l.rstrip("\n") for l in lines[i: after_end]] if context_lines > 0 else []
+                after = [l.rstrip("\n")[:LINE_SNIPPET_MAX] + ("...(truncated)" if len(l.rstrip("\n")) > LINE_SNIPPET_MAX else "") for l in lines[i: after_end]] if context_lines > 0 else []
+
+                display_line = line.rstrip("\n")
+                if len(display_line) > LINE_SNIPPET_MAX:
+                    display_line = display_line[:LINE_SNIPPET_MAX] + "...(truncated)"
 
                 matches.append({
                     "line_no": i,
                     "col_start": col_start,
                     "col_end": col_end,
-                    "line": line.rstrip("\n"),
+                    "line": display_line,
                     "context_before": before,
                     "context_after": after,
                 })

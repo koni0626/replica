@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Iterator, List, Dict, Any, Tuple, Union
 from pathlib import Path
 from datetime import datetime
+import json
 from services.project_service import ProjectService
 from services.ai_log import AiRunLogger
 
@@ -265,6 +266,70 @@ class GptProvider(object):
             parts.append(f"{head}\n{body}" if head else body)
         return "\n\n".join(parts)
 
+    def _summarize_tool_result(self, name: str, args: Dict[str, Any], result: Any, max_chars: int = 16000) -> str:
+        """ツールの返り値を、会話に載せても安全なサイズに要約/切り詰める。
+        - search_grep: JSONを解析して要約（上位ファイル/マッチのみ）
+        - find_files/list_files: 行配列を先頭N件に圧縮
+        - その他: 文字数で単純切り詰め
+        """
+        try:
+            if isinstance(result, bytes):
+                s = result.decode("utf-8", errors="ignore")
+            elif isinstance(result, str):
+                s = result
+            else:
+                s = json.dumps(result, ensure_ascii=False)
+
+            if name == "search_grep":
+                try:
+                    obj = json.loads(s)
+                    files = obj.get("files", []) or []
+                    top_files = files[:5]
+                    simplified_files = []
+                    for f in top_files:
+                        matches = f.get("matches", []) or []
+                        sm = []
+                        for m in matches[:5]:
+                            line = (m.get("line") or "")
+                            if isinstance(line, str) and len(line) > 180:
+                                line = line[:180] + "...(truncated)"
+                            sm.append({
+                                "line_no": m.get("line_no"),
+                                "line": line,
+                            })
+                        simplified_files.append({
+                            "file_path": f.get("file_path"),
+                            "match_count": f.get("match_count"),
+                            "matches": sm,
+                        })
+                    summary = {
+                        "ok": obj.get("ok", True),
+                        "base_path": obj.get("base_path"),
+                        "query": obj.get("query") or obj.get("pattern") or "",
+                        "stats": obj.get("stats"),
+                        "file_count": len(files),
+                        "files": simplified_files,
+                        "omitted_files": max(0, len(files) - len(simplified_files)),
+                    }
+                    s = json.dumps(summary, ensure_ascii=False)
+                except Exception:
+                    # JSON解析できない場合は文字列切り詰め
+                    pass
+            elif name in ("find_files", "list_files"):
+                lines = s.splitlines()
+                head = lines[:200]
+                omitted = len(lines) - len(head)
+                if omitted > 0:
+                    head.append(f"...(omitted {omitted} lines)")
+                s = "\n".join(head)
+
+            if len(s) > max_chars:
+                s = s[:max_chars] + f"\n...(truncated to {max_chars} chars)"
+            return s
+        except Exception:
+            # 例外時は保守的に短いテキストを返す
+            return str(result)[:2000] + "\n...(truncated)"
+
     def stream_with_history_and_tool(
         self,
         *,
@@ -429,9 +494,11 @@ class GptProvider(object):
                     result = f"error={type(e).__name__}: {e}"
                     print(f"[{datetime.now().strftime('%Y/%m/%d %H:%M:%S')}]", e)
 
-                latest_tool_messages.append(ToolMessage(content=str(result), tool_call_id=call_id))
+                # ここでツール結果を縮約してから会話へ載せる
+                safe = self._summarize_tool_result(name, args, result, max_chars=16000)
+                latest_tool_messages.append(ToolMessage(content=safe, tool_call_id=call_id))
                 try:
-                    logger.tool_result(turn, call_id, result)
+                    logger.tool_result(turn, call_id, safe)
                 except Exception:
                     pass
                 tool_call_count += 1
