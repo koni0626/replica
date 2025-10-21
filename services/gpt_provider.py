@@ -21,6 +21,7 @@ from tools import office_word_tool
 from tools import office_excel_tool
 from tools import office_pptx_tool
 from tools import pdf_tool
+from tools import agents_tools
 
 
 class GptProvider(object):
@@ -73,12 +74,18 @@ class GptProvider(object):
             git_tool.git_rev_parse,
             git_tool.git_repo_root,
             git_tool.git_diff_own_changes_files,
-            # office
+            # office 読み取り系
             office_word_tool.read_docx_text,
             office_excel_tool.read_xlsx_text,
             office_pptx_tool.read_pptx_text,
-            #PDF
-            pdf_tool.read_pdf_text
+            # PDF
+            pdf_tool.read_pdf_text,
+            # CSV 書き出し（CP932／Excel互換）
+            agents_tools.csv_write_cp932,
+            # CSV→XLSX 変換（出力は doc_path 基準）
+            agents_tools.csv_to_xlsx,
+            # Markdown→Word 変換（出力は doc_path 基準）
+            agents_tools.md_to_docx,
         ])
         # 検索系ツール（base_path を doc_path 配下に固定する対象）
         self._tools_require_base_path = {"find_files", "list_files", "list_dirs", "search_grep"}
@@ -113,12 +120,18 @@ class GptProvider(object):
             "git_rev_parse": git_tool.git_rev_parse,
             "git_repo_root": git_tool.git_repo_root,
             "git_diff_own_changes_files": git_tool.git_diff_own_changes_files,
-            # office
+            # office 読み取り系
             "read_docx_text": office_word_tool.read_docx_text,
             "read_xlsx_text": office_excel_tool.read_xlsx_text,
             "read_pptx_text": office_pptx_tool.read_pptx_text,
             # PDF
-            "read_pdf_text": pdf_tool.read_pdf_text
+            "read_pdf_text": pdf_tool.read_pdf_text,
+            # CSV 書き出し
+            "csv_write_cp932": agents_tools.csv_write_cp932,
+            # CSV→XLSX 変換
+            "csv_to_xlsx": agents_tools.csv_to_xlsx,
+            # Markdown→Word 変換
+            "md_to_docx": agents_tools.md_to_docx,
         }
 
     def _project_base_dir(self, project_id: int) -> Path:
@@ -204,7 +217,7 @@ class GptProvider(object):
                 "# ソースコード修正時のガイド:\n"
                 "- 1000行以下のファイルの場合、新しくソースプログラムをwrite_fileで書き換える。\n"
                 "- 1000行より大きいファイルの場合、ソースは変更せず、修正が必要な分をメッセージで表示する。\n"
-                "- 正許可された場合は、1000行以上のソースコードも修正する\n"
+                "- 許可された場合は、1000行以上のソースコードも修正する\n"
                 "- 可能であればどのあたりにソースコードを適用すればよいか、行番号で教えること。\n"
                 "- 修正時は修正に必要な個所のみ修正すること。不必要な修正は行わないこと。\n"
             )),

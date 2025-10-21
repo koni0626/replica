@@ -19,6 +19,20 @@ from tools.fs_modules import (
 )
 
 
+# ユーザ入力パスの正規化（repo エイリアスや ./ を無害化）
+def _normalize_user_rel_path(arg: str) -> str:
+    s = str(arg or "").replace("\\", "/").strip()
+    if not s:
+        return ""
+    if s == "repo":
+        return ""  # doc_path 直下
+    if s.startswith("repo/"):
+        return s[5:]
+    if s.startswith("./"):
+        return s[2:]
+    return s
+
+
 # =====================
 # ファイル検索/列挙系
 # =====================
@@ -186,7 +200,7 @@ def read_file(file_name: str, project_id: int) -> str:
     """
     base = resolve_doc_path(project_id)
 
-    p = Path(file_name).expanduser()
+    p = Path(_normalize_user_rel_path(file_name)).expanduser()
     if not p.is_absolute():
         p = base / p
     p = p.resolve()
@@ -243,7 +257,7 @@ def write_file(file_path: str, content: str, project_id: int) -> bool:
     """
     try:
         base = resolve_doc_path(project_id)
-        p = Path(file_path).expanduser()
+        p = Path(_normalize_user_rel_path(file_path)).expanduser()
         if not p.is_absolute():
             p = base / p
         p = p.resolve()
@@ -274,7 +288,7 @@ def make_dirs(dir_path: str, project_id: int) -> bool:
     """
     try:
         base = resolve_doc_path(project_id)
-        p = Path(dir_path).expanduser()
+        p = Path(_normalize_user_rel_path(dir_path)).expanduser()
         if not p.is_absolute():
             p = base / p
         p = p.resolve()
@@ -306,7 +320,7 @@ def file_stat(file_path: str, project_id: int) -> str:
         info["error"] = f"doc_path_resolve_failed: {type(e).__name__}: {e}"
         return json.dumps(info, ensure_ascii=False)
 
-    p = Path(file_path).expanduser()
+    p = Path(_normalize_user_rel_path(file_path)).expanduser()
     if not p.is_absolute():
         p = base / p
     p = p.resolve()
@@ -352,7 +366,7 @@ def read_file_range(file_path: str, start_line: int, end_line: int, project_id: 
         result.update({"exists": False, "error": f"doc_path_resolve_failed: {type(e).__name__}: {e}"})
         return json.dumps(result, ensure_ascii=False)
 
-    p = Path(file_path).expanduser()
+    p = Path(_normalize_user_rel_path(file_path)).expanduser()
     if not p.is_absolute():
         p = base / p
     p = p.resolve()
