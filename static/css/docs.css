@@ -49,3 +49,27 @@ pre { position: relative; }
 #prompt-preview { min-height: 8rem; }
 #output-preview { min-height: 12rem; }
 #loading-spinner .loading-anim { width: 256px; height: 256px; object-fit: contain; }
+
+/* アクションボタンがカードからはみ出ないように折返し・縮小 */
+.card-header .action-bar{ max-width: 100%; }
+.card-header .action-bar > *{ flex: 0 0 auto; }
+@media (max-width: 1200px){
+  .card-header .action-bar{ gap: .5rem; }
+  .card-header .action-bar .btn{ padding: .15rem .4rem; font-size: .8rem; }
+  .card-header select.form-select-sm{ max-width: 9rem; }
+}
+@media (max-width: 992px){
+  .card-header .action-bar{ width: 100%; justify-content: flex-start; }
+}
+
+/* Markdown内の画像がカードからはみ出ないようにする */
+#output-preview img,
+.markdown-body img,
+#image-preview img{
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+}
+
+/* 画像の横スクロールを防ぐための保険（必要に応じて有効化） */
+.card .card-body{ overflow-x: hidden; }

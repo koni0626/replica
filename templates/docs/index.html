@@ -13,14 +13,17 @@
   </div>
   <form method="post" novalidate>
     {{ form.csrf_token }}
+    <!-- 画像挿入用の一時保持フィールド（JSで使用） -->
+    <input type="hidden" id="last-image-url" value="">
+    <input type="hidden" id="last-image-alt" value="">
 
     <div class="row g-4">
       <!-- 左：プロンプト -->
       <div class="col-12 col-md-6">
         <div class="card h-100">
-          <div class="card-header d-flex align-items-center justify-content-between">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap">
             <span class="fw-bold">{{ form.prompt.label }}</span>
-            <div class="d-flex gap-2 align-items-center">
+            <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end action-bar">
               <!-- モデル選択（小さめのセレクト） -->
               <select id="model-select" class="form-select form-select-sm w-auto" title="使用するモデルを選択">
                 <option value="gpt-5" selected>gpt-5</option>
@@ -33,8 +36,20 @@
                      class="d-none"
                      multiple
                      accept=".txt,.md,.markdown,.json,.yaml,.yml,.csv,.htm,.html,.docx,.pptx,.xlsx,.pdf,.py,.js,.ts,.java,.php,.go,.rb,.cs,.sh,.sql,.css" />
-              <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap flex-shrink-0 wb-keep" id="btn-upload-trigger">
+              <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0 wb-keep" id="btn-upload-trigger">
                 添付ファイルを追加
+              </button>
+
+              <!-- 画像プロンプト生成＆生成ボタン -->
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-image-prompt">
+                画像プロンプト生成
+              </button>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="btn-generate-image">
+                このプロンプトで画像生成
+              </button>
+              <!-- 本文への画像挿入ボタン（生成後に有効化） -->
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-insert-image-md" disabled>
+                本文に画像を挿入
               </button>
 
               {{ form.submit_generate_tool(class="btn btn-primary btn-sm", id="btn-generate_tool") }}
@@ -48,6 +63,13 @@
             {% endfor %}
             <div class="border rounded p-3 bg-light" id="prompt-preview">
               <div class="text-muted">（プロンプトのMarkdownプレビューがここに表示されます）</div>
+            </div>
+
+            <!-- 画像用プロンプト（編集可） -->
+            <div class="mt-3">
+              <label for="imgprompt-input" class="form-label">画像用プロンプト（編集可）</label>
+              <textarea id="imgprompt-input" class="form-control" rows="4" placeholder="画像生成に最適化されたプロンプトがここに入ります。"></textarea>
+              <div class="form-text">プリセット: JRPG風の厚塗り（ややアニメ寄り）</div>
             </div>
 
             <!-- 添付ファイルのチップ表示領域 -->
@@ -82,6 +104,11 @@
               <div class="text-muted">（GPT生成結果のMarkdownプレビューがここに表示されます）</div>
             </div>
             {{ form.generated_content(class="form-control", id="output-input", rows="10", placeholder="必要ならここで加筆修正してからコミットできます") }}
+
+            <!-- 画像プレビュー -->
+            <div class="mt-3" id="image-preview">
+              <div class="text-muted">（画像プレビューがここに表示されます）</div>
+            </div>
           </div>
         </div>
       </div>
@@ -234,6 +261,8 @@
   <div id="docs-root"
        data-stream-url-tool="{{ url_for('docs.stream_generate_tool', project_id=project_id) }}"
        data-upload-url="{{ url_for('docs.upload', project_id=project_id) }}"
+       data-image-gen-url="{{ url_for('docs.generate_image', project_id=project_id) }}"
+       data-image-prompt-url="{{ url_for('docs.generate_image_prompt', project_id=project_id) }}"
        data-project-id="{{ project_id }}"
        {% if current_left %}
        data-left-doc-id="{{ current_left.doc_id }}"

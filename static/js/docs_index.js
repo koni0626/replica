@@ -365,6 +365,123 @@
       if (btnGenerateTool) btnGenerateTool.addEventListener('click', streamGenerateTool);
     })();
 
+    // === 画像プロンプト整形 ＆ 画像生成（フロント統合） ===
+    (function(){
+      const root = document.getElementById('docs-root');
+      const btnPrompt = document.getElementById('btn-image-prompt');
+      const btnGenImg = document.getElementById('btn-generate-image');
+      const btnInsert = document.getElementById('btn-insert-image-md');
+      const spinner = document.getElementById('loading-spinner');
+      const userPromptInput = document.getElementById('prompt-input');
+      const imgPromptInput = document.getElementById('imgprompt-input');
+      const outTa = document.getElementById('output-input');
+      const preview = document.getElementById('image-preview');
+
+      const promptUrl = root?.getAttribute('data-image-prompt-url');
+      const genUrl = root?.getAttribute('data-image-gen-url');
+      const csrftoken = document.querySelector("input[name='csrf_token']")?.value;
+
+      if (btnPrompt && promptUrl) {
+        btnPrompt.addEventListener('click', async () => {
+          const userPrompt = (userPromptInput?.value || '').trim();
+          if (!userPrompt) {
+            alert('画像にしたい内容（ユーザープロンプト）を左側に入力してください');
+            return;
+          }
+          try {
+            spinner?.classList.remove('d-none');
+            btnPrompt.setAttribute('disabled', 'disabled');
+            const resp = await fetch(promptUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {})
+              },
+              body: JSON.stringify({ user_prompt: userPrompt, preset: 'jrpg_painterly_anime', size: '768x768', language: 'ja' })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.ok) {
+              console.error('image prompt failed', data);
+              showToast('画像プロンプト生成に失敗しました');
+              return;
+            }
+            if (imgPromptInput) imgPromptInput.value = data.prompt || '';
+            showToast('画像用プロンプトを作成しました');
+          } catch (e) {
+            console.error(e);
+            alert('画像プロンプト生成中にエラーが発生しました');
+          } finally {
+            spinner?.classList.add('d-none');
+            btnPrompt.removeAttribute('disabled');
+          }
+        });
+      }
+
+      if (btnGenImg && genUrl) {
+        btnGenImg.addEventListener('click', async () => {
+          const prompt = ((imgPromptInput?.value || '').trim()) || ((userPromptInput?.value || '').trim());
+          if (!prompt) {
+            alert('画像用プロンプトが空です');
+            return;
+          }
+          try {
+            spinner?.classList.remove('d-none');
+            btnGenImg.setAttribute('disabled', 'disabled');
+            const resp = await fetch(genUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {})
+              },
+              body: JSON.stringify({ prompt, size: '768x768' })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.ok) {
+              console.error('image gen failed', data);
+              showToast('画像生成に失敗しました');
+              return;
+            }
+            const url = data.url;
+            // プレビュー差し替え
+            if (preview) {
+              preview.innerHTML = `<img src="${url}" alt="generated image" class="img-fluid border rounded">`;
+            }
+            // hidden に保持して「本文に挿入」を有効化
+            const hiddenUrl = document.getElementById('last-image-url');
+            const hiddenAlt = document.getElementById('last-image-alt');
+            if (hiddenUrl) hiddenUrl.value = url;
+            const altText = (document.getElementById('imgprompt-input')?.value || prompt || 'Generated image').trim();
+            if (hiddenAlt) hiddenAlt.value = altText;
+            if (btnInsert) btnInsert.removeAttribute('disabled');
+            showToast('画像を生成しました');
+          } catch (e) {
+            console.error(e);
+            alert('画像生成中にエラーが発生しました');
+          } finally {
+            spinner?.classList.add('d-none');
+            btnGenImg.removeAttribute('disabled');
+          }
+        });
+      }
+
+      // 本文へ画像Markdownを挿入
+      if (btnInsert && outTa) {
+        btnInsert.addEventListener('click', () => {
+          const url = document.getElementById('last-image-url')?.value || '';
+          let alt = document.getElementById('last-image-alt')?.value || '';
+          if (!url) {
+            alert('先に画像を生成してください');
+            return;
+          }
+          alt = alt.replace(/\n+/g, ' ').slice(0, 120) || 'Generated image';
+          const md = `\n\n![${alt}](${url})\n\n`;
+          outTa.value = (outTa.value || '') + md;
+          outTa.dispatchEvent(new Event('input'));
+          showToast('本文に画像Markdownを挿入しました');
+        });
+      }
+    })();
+
     /**
      * 添付アップロード。必須拡張子のみを対象に /docs/<pid>/upload へPOST。
      * 成功時は attachments-list にチップを追加。LLMには paths を渡す（プロンプトへの自動追記は廃止）。

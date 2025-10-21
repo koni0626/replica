@@ -9,10 +9,13 @@ from pathlib import Path
 import os
 import re
 import uuid
+import mimetypes
 from werkzeug.utils import secure_filename
 
 from flask import current_app
 from services.project_service import ProjectService, ALLOWED_THEMES
+from services.image_prompt_service import ImagePromptService
+from services.image_service import ImageService
 
 
 docs_bp = Blueprint("docs", __name__)
@@ -167,7 +170,7 @@ def upload(project_id: int):
     必須拡張子＋Office/PDFを対象とした、ファイルアップロードAPI。
     - 保存先: ./media/<user_id>/<project_id>/<uuid>_<secure_stem>.<ext>
     - 返却: { ok, files: [{name, size, ext, text_preview, stored_path}] }
-      stored_path はクライアントに返すが、サーバ受信時に必ず media ルート配下か検証する。
+    stored_path はクライアントに返すが、サーバ受信時に必ず media ルート配下か検証する。
     - プレビューは ExtractService で最大500文字を抽出（失敗時はUTF-8テキスト読みにフォールバック）。
     """
     if 'files' not in request.files:
@@ -221,6 +224,80 @@ def upload(project_id: int):
         })
 
     return jsonify({"ok": True, "files": results})
+
+
+@docs_bp.route("/<int:project_id>/image/prompt", methods=["POST"])
+@login_required
+def generate_image_prompt(project_id: int):
+    """ユーザーの短文を画像生成向けプロンプトに整形して返すAPI。
+    body: { user_prompt: str, preset?: str, size?: str, language?: str }
+    return: { ok, prompt, negative_prompt, params }
+    """
+    data = request.get_json(silent=True) or {}
+    user_prompt = (data.get("user_prompt") or data.get("prompt") or "").strip()
+    if not user_prompt:
+        return jsonify({"ok": False, "error": "user_prompt_required"}), 400
+
+    preset = (data.get("preset") or "jrpg_painterly_anime").strip()
+    size = (data.get("size") or "768x768").strip()
+    language = (data.get("language") or "ja").strip()
+
+    svc = ImagePromptService()
+    res = svc.generate(user_prompt=user_prompt, preset=preset, size=size, language=language)
+
+    return jsonify({
+        "ok": True,
+        "prompt": res.prompt,
+        "negative_prompt": res.negative_prompt,
+        "params": res.params,
+    })
+
+
+@docs_bp.route("/<int:project_id>/image/generate", methods=["POST"])
+@login_required
+def generate_image(project_id: int):
+    """
+    プロンプトから画像を生成し、media/<user>/<project>/images に保存してURLを返す。
+    body: { prompt: str, size?: "512x512"|"768x768"|"1024x1024" }
+    returns: { ok, url, stored_path, ext, mime }
+    """
+    data = request.get_json(silent=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    size = (data.get("size") or "768x768").strip()
+    if not prompt:
+        return jsonify({"ok": False, "error": "prompt_required"}), 400
+
+    svc = ImageService()
+    img_bytes, mime, ext = svc.generate(prompt=prompt, size=size)
+
+    dest_dir = _media_dir(project_id, current_user.user_id) / "images"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4().hex[:12]}.{ext}"
+    abs_path = dest_dir / filename
+    abs_path.write_bytes(img_bytes)
+
+    from urllib.parse import quote
+    view_url = url_for("docs.view_image", project_id=project_id) + f"?path={quote(str(abs_path))}"
+
+    return jsonify({
+        "ok": True,
+        "url": view_url,
+        "stored_path": str(abs_path),
+        "ext": ext,
+        "mime": mime,
+    })
+
+
+@docs_bp.route("/<int:project_id>/image/view", methods=["GET"])
+@login_required
+def view_image(project_id: int):
+    """media 配下の画像を安全に返す。?path=<absolute path>"""
+    p = (request.args.get("path") or "").strip()
+    if not p:
+        return abort(400, description="path required")
+    path = _safe_media_file(p, project_id, current_user.user_id)
+    mime, _ = mimetypes.guess_type(str(path))
+    return send_file(path, mimetype=mime or None)
 
 
 def _build_attachments_text(project_id: int, user_id: int, paths: list[str], per_file_limit: int = 100_000) -> str:
